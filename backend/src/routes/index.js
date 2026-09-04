@@ -1,0 +1,44 @@
+import { Router } from 'express';
+import healthRoutes from './health.routes.js';
+import authRoutes from './auth.routes.js';
+import dashboardRoutes from './dashboard.routes.js';
+import learningRoutes from './learning.routes.js';
+import playgroundRoutes from './playground.routes.js';
+import problemsRoutes from './problems.routes.js';
+import quizzesRoutes from './quizzes.routes.js';
+import aiRoutes from './ai.routes.js';
+import notesRoutes from './notes.routes.js';
+import progressRoutes from './progress.routes.js';
+import gamificationRoutes from './gamification.routes.js';
+import leaderboardRoutes from './leaderboard.routes.js';
+import contestsRoutes from './contests.routes.js';
+import adminRoutes from './admin.routes.js';
+import notificationsRoutes from './notifications.routes.js';
+import searchRoutes from './search.routes.js';
+import settingsRoutes from './settings.routes.js';
+import bookmarksRoutes from './bookmarks.routes.js';
+import integrationsRoutes from './integrations.routes.js';
+
+const router = Router();
+
+router.use('/health', healthRoutes);
+router.use('/integrations', integrationsRoutes);
+router.use('/auth', authRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/topics', learningRoutes);
+router.use('/playground', playgroundRoutes);
+router.use('/problems', problemsRoutes);
+router.use('/quizzes', quizzesRoutes);
+router.use('/ai', aiRoutes);
+router.use('/notes', notesRoutes);
+router.use('/progress', progressRoutes);
+router.use('/gamification', gamificationRoutes);
+router.use('/leaderboard', leaderboardRoutes);
+router.use('/contests', contestsRoutes);
+router.use('/admin', adminRoutes);
+router.use('/notifications', notificationsRoutes);
+router.use('/search', searchRoutes);
+router.use('/settings', settingsRoutes);
+router.use('/bookmarks', bookmarksRoutes);
+
+export default router;

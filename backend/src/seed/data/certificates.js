@@ -1,0 +1,75 @@
+/**
+ * 50 achievement certificates (completion milestones).
+ * Certificates use the Certificate model — distinct from badges but shown as achievements.
+ */
+function cert(slug, name, description, type, threshold, xpBonus, topicSlugs = []) {
+  return {
+    slug,
+    name,
+    description,
+    template: {
+      backgroundColor: '#ffffff',
+      accentColor: '#4f46e5',
+      signatureText: 'ThinkStack Academic Board',
+      footerText: 'Verified DSA competency milestone',
+    },
+    criteria: { type, threshold, topicSlugs },
+    xpBonus,
+    isActive: true,
+    status: 'published',
+  };
+}
+
+export const CERTIFICATES = [
+  cert('cert-programming-fundamentals', 'Programming Fundamentals Certificate', 'Completed foundational programming lessons', 'topics_completed', 25, 100, ['intro-to-programming', 'programming-basics']),
+  cert('cert-variables-mastery', 'Variables & Types Mastery', 'Demonstrated proficiency in variables and data types', 'topics_completed', 30, 100),
+  cert('cert-control-flow', 'Control Flow Specialist', 'Mastered conditionals, loops, and functions', 'topics_completed', 40, 120),
+  cert('cert-recursion', 'Recursion Foundations', 'Completed recursion fundamentals module', 'module_completed', 1, 150, ['recursion-fundamentals']),
+  cert('cert-memory', 'Memory Management Certificate', 'Understands stack, heap, pointers, and references', 'module_completed', 1, 150, ['memory-pointers']),
+  cert('cert-arrays-strings', 'Arrays & Strings Certificate', 'Completed arrays and strings fundamentals', 'topics_completed', 50, 150),
+  cert('cert-complexity', 'Complexity Analysis Certificate', 'Can analyze Big O, Omega, and Theta', 'module_completed', 1, 200, ['complexity-analysis']),
+  cert('cert-searching', 'Searching Algorithms Certificate', 'Mastered linear and binary search variants', 'module_completed', 1, 200, ['searching-algorithms']),
+  cert('cert-sorting', 'Sorting Algorithms Certificate', 'Understands comparison and non-comparison sorts', 'module_completed', 1, 200, ['sorting-algorithms']),
+  cert('cert-bit-manipulation', 'Bit Manipulation Certificate', 'Proficient in bitwise operations and tricks', 'module_completed', 1, 150, ['bit-manipulation']),
+  cert('cert-hashing', 'Hashing Certificate', 'Understands hash functions and collision resolution', 'module_completed', 1, 150, ['hashing-fundamentals']),
+  cert('cert-two-pointer', 'Two Pointer & Sliding Window', 'Mastered two-pointer and window techniques', 'module_completed', 1, 180, ['two-pointer-sliding-window']),
+  cert('cert-greedy', 'Greedy Algorithms Certificate', 'Can identify and prove greedy strategies', 'module_completed', 1, 200, ['greedy-techniques']),
+  cert('cert-divide-conquer', 'Divide & Conquer Certificate', 'Applies divide and conquer effectively', 'module_completed', 1, 200, ['divide-and-conquer']),
+  cert('cert-backtracking', 'Backtracking Certificate', 'Solves constraint satisfaction with backtracking', 'module_completed', 1, 250, ['backtracking']),
+  cert('cert-dp', 'Dynamic Programming Certificate', 'Builds optimal DP states and transitions', 'module_completed', 1, 300, ['dynamic-programming']),
+  cert('cert-linked-lists', 'Linked Lists Certificate', 'Implements and manipulates linked structures', 'module_completed', 1, 150, ['linked-lists']),
+  cert('cert-stacks-queues', 'Stacks & Queues Certificate', 'Uses LIFO and FIFO structures effectively', 'module_completed', 1, 150, ['stacks-queues']),
+  cert('cert-hash-tables', 'Hash Tables Certificate', 'Designs hash-based solutions', 'module_completed', 1, 180, ['hash-tables-maps']),
+  cert('cert-trees', 'Trees Certificate', 'Traverses and manipulates tree structures', 'module_completed', 1, 200, ['trees-fundamentals']),
+  cert('cert-bst', 'Balanced Trees Certificate', 'Understands BST, AVL, and red-black trees', 'module_completed', 1, 250, ['bst-balanced-trees']),
+  cert('cert-heap', 'Heap & Priority Queue Certificate', 'Uses heaps for selection and scheduling', 'module_completed', 1, 200, ['heap-priority-queue']),
+  cert('cert-advanced-trees', 'Advanced Trees Certificate', 'Trie, segment tree, and Fenwick tree proficiency', 'module_completed', 1, 300, ['trie-segment-fenwick']),
+  cert('cert-union-find', 'Union Find Certificate', 'Applies DSU for connectivity problems', 'module_completed', 1, 200, ['union-find']),
+  cert('cert-graphs', 'Graphs Fundamentals Certificate', 'Models problems as graphs correctly', 'module_completed', 1, 200, ['graphs-fundamentals']),
+  cert('cert-traversal', 'Graph Traversal Certificate', 'Implements DFS, BFS, and topological sort', 'module_completed', 1, 250, ['graph-traversal']),
+  cert('cert-shortest-path', 'Shortest Path Certificate', 'Applies Dijkstra, Bellman-Ford, Floyd-Warshall', 'module_completed', 1, 300, ['shortest-path-algorithms']),
+  cert('cert-mst', 'MST & Advanced Graphs Certificate', 'Uses Prim, Kruskal, and advanced graph techniques', 'module_completed', 1, 300, ['mst-graph-advanced']),
+  cert('cert-strings', 'String Algorithms Certificate', 'Implements KMP, Rabin-Karp, and suffix structures', 'module_completed', 1, 300, ['string-algorithms-advanced']),
+  cert('cert-number-theory', 'Number Theory Certificate', 'Applies modular arithmetic and prime techniques', 'module_completed', 1, 250, ['number-theory-math']),
+  cert('cert-game-geometry', 'Game Theory & Geometry Certificate', 'Advanced mathematical DSA competency', 'module_completed', 1, 250, ['game-theory-geometry']),
+  cert('cert-interview-ready', 'Interview Ready Certificate', 'Completed interview preparation mastery module', 'module_completed', 1, 400, ['interview-prep-mastery']),
+  cert('cert-10-problems', '10 Problems Solved', 'Solved 10 practice problems', 'problems_solved', 10, 50),
+  cert('cert-50-problems', '50 Problems Solved', 'Solved 50 practice problems', 'problems_solved', 50, 150),
+  cert('cert-100-problems', '100 Problems Solved', 'Solved 100 practice problems', 'problems_solved', 100, 300),
+  cert('cert-200-problems', '200 Problems Solved', 'Solved 200 practice problems', 'problems_solved', 200, 500),
+  cert('cert-300-problems', '300 Problems Master', 'Solved all curated practice problems', 'problems_solved', 300, 800),
+  cert('cert-quiz-25', '25 Quizzes Passed', 'Passed 25 topic quizzes', 'quizzes_passed', 25, 100),
+  cert('cert-quiz-100', '100 Quizzes Passed', 'Passed 100 topic quizzes', 'quizzes_passed', 100, 300),
+  cert('cert-streak-30', '30-Day Consistency', 'Maintained a 30-day learning streak', 'streak', 30, 200),
+  cert('cert-level-10', 'Level 10 Achievement', 'Reached platform level 10', 'level', 10, 200),
+  cert('cert-level-25', 'Level 25 Achievement', 'Reached platform level 25', 'level', 25, 500),
+  cert('cert-contest-participant', 'Contest Participant', 'Participated in 5 contests', 'contests_joined', 5, 150),
+  cert('cert-contest-winner', 'Contest Winner', 'Won first place in a contest', 'contest_wins', 1, 500),
+  cert('cert-visualizer', 'Visualizer Expert', 'Used algorithm visualizer 25 times', 'visualizer_sessions', 25, 100),
+  cert('cert-daily-30', '30 Daily Challenges', 'Completed 30 daily challenges', 'daily_challenges', 30, 200),
+  cert('cert-xp-5000', '5000 XP Milestone', 'Earned 5000 total experience points', 'total_xp', 5000, 300),
+  cert('cert-curriculum-complete', 'Full Curriculum Graduate', 'Completed the entire ThinkStack DSA curriculum', 'topics_completed', 500, 2000),
+  cert('cert-faang-ready', 'FAANG Interview Ready', 'Completed advanced modules and 200+ problems', 'problems_solved', 200, 1000),
+];
+
+export default CERTIFICATES;

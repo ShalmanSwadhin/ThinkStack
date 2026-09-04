@@ -1,0 +1,1439 @@
+openapi: 3.0.3
+info:
+  title: ThinkStack API
+  description: |
+    REST API for the ThinkStack Interactive DSA Learning Platform.
+
+    ## Authentication
+    - **Access token**: JWT in `Authorization: Bearer <token>` header (15 min TTL).
+    - **Refresh token**: HTTP-only cookie `refreshToken` on path `/api/v1` (7 days, rotated on refresh).
+    - Register/login set both; call `POST /auth/refresh` with cookie to renew access token.
+
+    ## Response envelope
+    Success: `{ "success": true, "message": "...", "data": {...}, "meta": {...} }`
+    Error: `{ "success": false, "error": { "message": "...", "details": [...] } }`
+  version: 1.0.0
+  contact:
+    name: ThinkStack
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local development
+  - url: https://thinkstack-api.onrender.com/api/v1
+    description: Production (Render)
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Dashboard
+  - name: Learning
+  - name: Playground
+  - name: Problems
+  - name: Quizzes
+  - name: AI Tutor
+  - name: Notes
+  - name: Progress
+  - name: Gamification
+  - name: Leaderboard
+  - name: Contests
+  - name: Admin
+  - name: Notifications
+  - name: Search
+  - name: Settings
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refreshToken
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+        meta:
+          type: object
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+
+    RegisterBody:
+      type: object
+      required: [email, username, password]
+      properties:
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+          minLength: 3
+        password:
+          type: string
+          minLength: 8
+        displayName:
+          type: string
+
+    LoginBody:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    CodeRunBody:
+      type: object
+      required: [sourceCode, languageId]
+      properties:
+        sourceCode:
+          type: string
+        languageId:
+          type: integer
+          description: Judge0 language ID
+        stdin:
+          type: string
+
+    ProblemSubmitBody:
+      type: object
+      required: [sourceCode, languageId]
+      properties:
+        sourceCode:
+          type: string
+        languageId:
+          type: integer
+
+    QuizSubmitBody:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId:
+                type: string
+              selectedOptionId:
+                type: string
+
+    NoteBody:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        topicId:
+          type: string
+        problemId:
+          type: string
+
+    PreferencesBody:
+      type: object
+      properties:
+        theme:
+          type: string
+          enum: [light, dark, system]
+        editorFontSize:
+          type: integer
+        editorTabSize:
+          type: integer
+        emailNotifications:
+          type: boolean
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new student account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterBody'
+      responses:
+        '201':
+          description: Registered; sets refresh cookie
+        '400':
+          description: Validation error
+        '409':
+          description: Email or username taken
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginBody'
+      responses:
+        '200':
+          description: Login success; sets refresh cookie
+        '401':
+          description: Invalid credentials
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token and issue new access token
+      security:
+        - refreshCookie: []
+      responses:
+        '200':
+          description: New access token
+        '401':
+          description: Invalid or expired refresh token
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (revoke refresh token)
+      security:
+        - refreshCookie: []
+      responses:
+        '200':
+          description: Logged out
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoke all refresh tokens for user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All sessions revoked
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset email
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+      responses:
+        '200':
+          description: Reset email sent if account exists
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Password updated
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Student dashboard summary
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Progress, daily challenge, recommendations, activity
+
+  /topics:
+    get:
+      tags: [Learning]
+      summary: List topics by category with user progress
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Topic list grouped by category
+
+  /topics/{slug}:
+    get:
+      tags: [Learning]
+      summary: Topic reader payload
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full topic content
+        '404':
+          description: Topic not found
+
+  /topics/{slug}/progress:
+    patch:
+      tags: [Learning]
+      summary: Update topic progress
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [not_started, in_progress, completed]
+                addMinutes:
+                  type: number
+                  description: Study time to add
+      responses:
+        '200':
+          description: Progress updated
+
+  /playground/languages:
+    get:
+      tags: [Playground]
+      summary: Supported Judge0 languages
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Language list
+
+  /playground/run:
+    post:
+      tags: [Playground]
+      summary: Execute code via Judge0 proxy
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodeRunBody'
+      responses:
+        '200':
+          description: stdout, stderr, status
+
+  /playground/history:
+    get:
+      tags: [Playground]
+      summary: User submission history
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated history
+
+  /playground/snippets:
+    get:
+      tags: [Playground]
+      summary: List saved snippets
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Snippet list
+    post:
+      tags: [Playground]
+      summary: Create snippet
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, sourceCode, languageId]
+              properties:
+                title:
+                  type: string
+                sourceCode:
+                  type: string
+                languageId:
+                  type: integer
+      responses:
+        '201':
+          description: Snippet created
+
+  /playground/snippets/{id}:
+    get:
+      tags: [Playground]
+      summary: Get snippet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snippet detail
+    patch:
+      tags: [Playground]
+      summary: Update snippet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snippet updated
+    delete:
+      tags: [Playground]
+      summary: Delete snippet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snippet deleted
+
+  /problems:
+    get:
+      tags: [Problems]
+      summary: List problems with filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: difficulty
+          in: query
+          schema:
+            type: string
+            enum: [easy, medium, hard]
+        - name: topic
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [solved, unsolved, attempted]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated problem list
+
+  /problems/{slug}:
+    get:
+      tags: [Problems]
+      summary: Problem detail (hidden tests stripped)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Problem detail
+
+  /problems/{slug}/run:
+    post:
+      tags: [Problems]
+      summary: Run against first sample test case
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemSubmitBody'
+      responses:
+        '200':
+          description: Sample run result
+
+  /problems/{slug}/submit:
+    post:
+      tags: [Problems]
+      summary: Submit solution for full grading
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemSubmitBody'
+      responses:
+        '200':
+          description: Verdict and test results
+
+  /problems/{slug}/submissions:
+    get:
+      tags: [Problems]
+      summary: User submission history for problem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Submission list
+
+  /quizzes:
+    get:
+      tags: [Quizzes]
+      summary: List quizzes with pass status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: topicId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quiz list
+
+  /quizzes/{id}:
+    get:
+      tags: [Quizzes]
+      summary: Quiz questions (answers omitted)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quiz for taking
+
+  /quizzes/{id}/submit:
+    post:
+      tags: [Quizzes]
+      summary: Submit quiz attempt
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizSubmitBody'
+      responses:
+        '200':
+          description: Score, explanations, XP awarded if passed
+
+  /quizzes/{id}/attempts:
+    get:
+      tags: [Quizzes]
+      summary: Attempt history
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Past attempts
+
+  /ai/conversations:
+    get:
+      tags: [AI Tutor]
+      summary: List conversations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Conversation list
+    post:
+      tags: [AI Tutor]
+      summary: Create conversation
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                topicId:
+                  type: string
+                problemId:
+                  type: string
+      responses:
+        '201':
+          description: Conversation created
+
+  /ai/conversations/{id}:
+    get:
+      tags: [AI Tutor]
+      summary: Get conversation with messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation detail
+    delete:
+      tags: [AI Tutor]
+      summary: Delete conversation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /ai/chat:
+    post:
+      tags: [AI Tutor]
+      summary: Send chat message (rate limited)
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                conversationId:
+                  type: string
+                topicId:
+                  type: string
+                problemId:
+                  type: string
+      responses:
+        '200':
+          description: AI reply
+        '429':
+          description: Rate limit exceeded
+
+  /notes:
+    get:
+      tags: [Notes]
+      summary: List user notes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: topicId
+          in: query
+          schema:
+            type: string
+        - name: problemId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Note list
+    post:
+      tags: [Notes]
+      summary: Create note
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteBody'
+      responses:
+        '201':
+          description: Note created
+
+  /notes/{id}:
+    get:
+      tags: [Notes]
+      summary: Get note
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Note detail
+    patch:
+      tags: [Notes]
+      summary: Update note
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteBody'
+      responses:
+        '200':
+          description: Note updated
+    delete:
+      tags: [Notes]
+      summary: Soft-delete note
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Note deleted
+
+  /progress:
+    get:
+      tags: [Progress]
+      summary: Aggregated progress, charts, weak areas
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Progress overview
+
+  /gamification:
+    get:
+      tags: [Gamification]
+      summary: XP, level, badges, coins, streak, daily challenge
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Gamification profile
+
+  /leaderboard:
+    get:
+      tags: [Leaderboard]
+      summary: Global or weekly XP rankings
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [global, weekly]
+            default: global
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Rankings with current user rank
+
+  /contests:
+    get:
+      tags: [Contests]
+      summary: List contests
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [upcoming, active, ended]
+      responses:
+        '200':
+          description: Contest list
+    post:
+      tags: [Contests]
+      summary: Create contest (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Contest created
+
+  /contests/{slug}:
+    get:
+      tags: [Contests]
+      summary: Contest detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Contest detail
+
+  /contests/{slug}/register:
+    post:
+      tags: [Contests]
+      summary: Register for contest
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Registered
+
+  /contests/{slug}/leaderboard:
+    get:
+      tags: [Contests]
+      summary: Contest ICPC-style leaderboard
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Leaderboard
+
+  /contests/{slug}/problems/{problemSlug}:
+    get:
+      tags: [Contests]
+      summary: Contest problem detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: problemSlug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Problem in contest context
+
+  /contests/{slug}/problems/{problemSlug}/run:
+    post:
+      tags: [Contests]
+      summary: Sample run in contest
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: problemSlug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemSubmitBody'
+      responses:
+        '200':
+          description: Run result
+
+  /contests/{slug}/problems/{problemSlug}/submit:
+    post:
+      tags: [Contests]
+      summary: Submit in contest window
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: problemSlug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProblemSubmitBody'
+      responses:
+        '200':
+          description: Submission verdict
+
+  /admin/analytics:
+    get:
+      tags: [Admin]
+      summary: Platform analytics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User growth, submissions, popular topics
+
+  /admin/export/{type}:
+    get:
+      tags: [Admin]
+      summary: Export CSV (users or submissions)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [users, submissions]
+      responses:
+        '200':
+          description: CSV file
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User list
+
+  /admin/users/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update user (role, status)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User updated
+
+  /admin/topics:
+    get:
+      tags: [Admin]
+      summary: List all topics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Topics
+    post:
+      tags: [Admin]
+      summary: Create topic
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Topic created
+
+  /admin/topics/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update topic
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Topic updated
+
+  /admin/problems:
+    get:
+      tags: [Admin]
+      summary: List all problems
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Problems
+    post:
+      tags: [Admin]
+      summary: Create problem
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Problem created
+
+  /admin/problems/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update problem
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Problem updated
+
+  /admin/quizzes:
+    get:
+      tags: [Admin]
+      summary: List quizzes
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Quizzes
+
+  /admin/quizzes/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update quiz
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quiz updated
+
+  /admin/contests:
+    get:
+      tags: [Admin]
+      summary: List contests (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Contests
+    post:
+      tags: [Admin]
+      summary: Create contest
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Contest created
+
+  /admin/contests/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update contest
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Contest updated
+
+  /admin/announcements:
+    get:
+      tags: [Admin]
+      summary: List announcements
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Announcements
+    post:
+      tags: [Admin]
+      summary: Create announcement (notifies users)
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Announcement created
+
+  /admin/announcements/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update announcement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Announcement updated
+
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Unread notification count
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Count
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Notification list
+    delete:
+      tags: [Notifications]
+      summary: Clear all notifications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Cleared
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All marked read
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification read
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Marked read
+
+  /notifications/{id}/unread:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification unread
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Marked unread
+
+  /search:
+    get:
+      tags: [Search]
+      summary: Global search (topics, problems, notes)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+      responses:
+        '200':
+          description: Grouped search results
+
+  /search/suggest:
+    get:
+      tags: [Search]
+      summary: Autocomplete suggestions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+      responses:
+        '200':
+          description: Suggestion list
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: User settings and preferences
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Settings payload
+
+  /settings/preferences:
+    patch:
+      tags: [Settings]
+      summary: Update theme, editor, notification prefs
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferencesBody'
+      responses:
+        '200':
+          description: Preferences updated
+
+  /settings/profile:
+    patch:
+      tags: [Settings]
+      summary: Update display name, bio, avatar
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profile updated
+
+  /settings/password:
+    patch:
+      tags: [Settings]
+      summary: Change password
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password changed
+
+  /settings/account:
+    delete:
+      tags: [Settings]
+      summary: Delete account (GDPR anonymization)
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Account deleted

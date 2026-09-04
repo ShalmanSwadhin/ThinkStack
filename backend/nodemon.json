@@ -1,0 +1,12 @@
+{
+  "watch": ["src", ".env"],
+  "ext": "js,json,env",
+  "signal": "SIGINT",
+  "delay": 1500,
+  "env": {
+    "THINKSTACK_NODEMON": "1"
+  },
+  "execMap": {
+    "js": "node"
+  }
+}

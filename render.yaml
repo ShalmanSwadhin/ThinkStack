@@ -1,0 +1,40 @@
+# Render Blueprint — ThinkStack API
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: thinkstack-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm run start -w backend
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: JUDGE0_MOCK
+        value: 'false'
+      - key: GEMINI_MOCK
+        value: 'false'
+      - key: JUDGE0_API_KEY
+        sync: false
+      - key: JUDGE0_API_HOST
+        value: judge0-ce.p.rapidapi.com
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false

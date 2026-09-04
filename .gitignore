@@ -1,0 +1,44 @@
+# Dependencies
+
+node_modules/
+.pnp
+.pnp.js
+
+# Build
+dist/
+build/
+.vite/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test
+coverage/
+.nyc_output/
+
+# Misc
+*.pem
+.cache/
+temp/
+tmp/
+
+# Cloudinary temp uploads
+uploads/
