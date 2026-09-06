@@ -362,7 +362,7 @@ export const ALGORITHMS = [
     renderer: 'array',
     inputType: 'array-target',
     defaultTarget: 42,
-    generate: (input, config) => searching.binarySearch(input, config.target ?? 42),
+    generate: (input, config) => searching.ternarySearch(input, config.target ?? 42),
     randomInput: () => randomArray(12),
   },
   {
@@ -372,7 +372,7 @@ export const ALGORITHMS = [
     renderer: 'array',
     inputType: 'array-target',
     defaultTarget: 42,
-    generate: (input, config) => searching.jumpSearch(input, config.target ?? 42),
+    generate: (input, config) => searching.exponentialSearch(input, config.target ?? 42),
     randomInput: () => randomArray(16),
   },
   {
@@ -381,7 +381,7 @@ export const ALGORITHMS = [
     category: 'sorting',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => sorting.mergeSort(input),
+    generate: (input) => sorting.timSort(input),
     randomInput: () => randomArray(10),
   },
   {
@@ -390,7 +390,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'tree',
     inputType: 'array',
-    generate: (input) => trees.bstInsert(input),
+    generate: (input) => trees.treeInorder(input),
     randomInput: () => [50, 30, 70, 20, 40],
   },
   {
@@ -399,7 +399,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'tree',
     inputType: 'array',
-    generate: (input) => trees.bstInsert(input),
+    generate: (input) => trees.treePreorder(input),
     randomInput: () => [40, 20, 60, 10, 30],
   },
   {
@@ -408,7 +408,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'tree',
     inputType: 'array',
-    generate: (input) => trees.bstInsert(input),
+    generate: (input) => trees.treePostorder(input),
     randomInput: () => [30, 20, 40, 10, 25],
   },
   {
@@ -417,7 +417,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'tree',
     inputType: 'array',
-    generate: (input) => trees.heapifyVisual(input),
+    generate: (input) => trees.levelOrderTraversal(input),
     randomInput: () => [40, 30, 50, 20, 35],
   },
   {
@@ -426,7 +426,7 @@ export const ALGORITHMS = [
     category: 'graphs',
     renderer: 'graph',
     inputType: 'graph',
-    generate: () => graphs.dfs({ start: DEFAULT_GRAPH.start }),
+    generate: () => graphs.topologicalSort(),
     randomInput: () => [],
   },
   {
@@ -435,7 +435,7 @@ export const ALGORITHMS = [
     category: 'graphs',
     renderer: 'graph',
     inputType: 'graph',
-    generate: () => graphs.kruskal(),
+    generate: () => graphs.unionFind(),
     randomInput: () => [],
   },
   {
@@ -444,7 +444,7 @@ export const ALGORITHMS = [
     category: 'graphs',
     renderer: 'graph',
     inputType: 'graph',
-    generate: () => graphs.dfs({ start: DEFAULT_GRAPH.start }),
+    generate: () => graphs.kosarajuSCC(),
     randomInput: () => [],
   },
   {
@@ -453,7 +453,7 @@ export const ALGORITHMS = [
     category: 'graphs',
     renderer: 'graph',
     inputType: 'graph',
-    generate: () => graphs.dfs({ start: DEFAULT_GRAPH.start }),
+    generate: () => graphs.tarjanBridges(),
     randomInput: () => [],
   },
   {
@@ -462,7 +462,7 @@ export const ALGORITHMS = [
     category: 'graphs',
     renderer: 'graph',
     inputType: 'graph',
-    generate: () => graphs.dfs({ start: DEFAULT_GRAPH.start }),
+    generate: () => graphs.tarjanArticulationPoints(),
     randomInput: () => [],
   },
   {
@@ -471,7 +471,7 @@ export const ALGORITHMS = [
     category: 'structures',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => structures.prefixSum(input.length ? input : [3, 7, 2, 9]),
+    generate: (input) => structures.hashLinearProbing(input),
     randomInput: () => [3, 7, 2, 9, 5],
   },
   {
@@ -480,7 +480,7 @@ export const ALGORITHMS = [
     category: 'structures',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => structures.stackOperations(input),
+    generate: (input) => structures.monotonicStack(input),
     randomInput: () => [2, 1, 2, 4, 3],
   },
   {
@@ -489,7 +489,7 @@ export const ALGORITHMS = [
     category: 'structures',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => structures.slidingWindow(input),
+    generate: (input) => structures.dequeSlidingWindowMax(input),
     randomInput: () => [1, 3, -1, -3, 5, 3, 6, 7],
   },
   {
@@ -498,7 +498,7 @@ export const ALGORITHMS = [
     category: 'dp',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => dp.knapsackDP(input),
+    generate: (input) => dp.bitmaskDP(input),
     randomInput: () => [1, 2, 3, 6, 10, 12],
   },
   {
@@ -507,7 +507,7 @@ export const ALGORITHMS = [
     category: 'dp',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => dp.lisDP(input),
+    generate: (input) => dp.editDistanceDP(input),
     randomInput: () => randomArray(6),
   },
   {
@@ -516,7 +516,7 @@ export const ALGORITHMS = [
     category: 'techniques',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => sorting.selectionSort(input),
+    generate: (input) => structures.greedyActivitySelection(input),
     randomInput: () => randomArray(8),
   },
   {
@@ -525,7 +525,7 @@ export const ALGORITHMS = [
     category: 'techniques',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => structures.prefixSum(input.length ? input : [1, 2, 3]),
+    generate: (input) => structures.backtrackingSubsets(input),
     randomInput: () => [1, 2, 3],
   },
   {
@@ -534,7 +534,7 @@ export const ALGORITHMS = [
     category: 'techniques',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => searching.linearSearch(input, input[0] ?? 1),
+    generate: (input) => structures.kmpSearch(input),
     randomInput: () => randomArray(10),
   },
   {
@@ -543,7 +543,7 @@ export const ALGORITHMS = [
     category: 'techniques',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => searching.linearSearch(input, input[input.length - 1] ?? 1),
+    generate: (input) => structures.rabinKarp(input),
     randomInput: () => randomArray(10),
   },
   {
@@ -552,7 +552,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'tree',
     inputType: 'array',
-    generate: (input) => trees.heapifyVisual(input),
+    generate: (input) => trees.segmentTreeDemo(input),
     randomInput: () => [1, 3, 5, 7, 9, 11],
   },
   {
@@ -561,7 +561,7 @@ export const ALGORITHMS = [
     category: 'trees',
     renderer: 'array',
     inputType: 'array',
-    generate: (input) => structures.prefixSum(input),
+    generate: (input) => structures.fenwickTree(input),
     randomInput: () => randomArray(8),
   },
 ];

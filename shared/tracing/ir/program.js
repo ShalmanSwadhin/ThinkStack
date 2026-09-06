@@ -96,8 +96,8 @@ function simplifyExpr(expr) {
   if (!expr) return null;
   if (expr.type === 'literal') return expr.value;
   if (expr.type === 'ident') return `$${expr.name}`;
-  if (expr.type === 'raw') return expr.source;
-  if (expr.type === 'binary') {
+  if (expr.type === 'unsupported') return expr.source;
+  if (expr.type === 'binary' || expr.type === 'logical') {
     return { op: expr.op, l: simplifyExpr(expr.left), r: simplifyExpr(expr.right) };
   }
   if (expr.type === 'array_literal') {
@@ -105,6 +105,12 @@ function simplifyExpr(expr) {
   }
   if (expr.type === 'array_access') {
     return { arr: simplifyExpr(expr.array), idx: simplifyExpr(expr.index) };
+  }
+  if (expr.type === 'pre_incdec' || expr.type === 'post_incdec') {
+    return { op: expr.op, post: expr.type === 'post_incdec', operand: simplifyExpr(expr.operand) };
+  }
+  if (expr.type === 'assign') {
+    return { op: expr.op, target: simplifyExpr(expr.target), value: simplifyExpr(expr.value) };
   }
   return expr;
 }

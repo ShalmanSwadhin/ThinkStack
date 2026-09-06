@@ -1,104 +1,34 @@
 /**
  * IR Expression AST — language-independent expression representation.
+ *
+ * `parseExpressionString` now delegates to engine/expressionParser.js (a real
+ * tokenizer + precedence-climbing parser) instead of scanning for the last
+ * top-level occurrence of one of six single-character operators. The previous
+ * approach could not distinguish `i++` from `i + +`, had no representation for
+ * prefix-vs-postfix increment, and had no notion of assignment as an expression —
+ * which is why compound-in-expression side effects like `sum = sum / i++` silently
+ * fell through to an unsafe `new Function`-based fallback elsewhere in the engine.
+ * See NEXT_PHASE_MANUAL_TRACING_FIX_REPORT.md for the full investigation.
+ *
+ * `EXPR_TYPES` and the node shapes below are kept identical (including the
+ * lowercase string values) to what existed before, so every other consumer of this
+ * module (ir/program.js's `normalizeProgram`, parsers/common.js, parsers/
+ * blockParser.js) keeps working without changes — the new, richer node kinds
+ * (`unary`, `pre_incdec`, `post_incdec`, `logical`, `ternary`, `assign`, `call`,
+ * `member_access`, `unsupported`) are additive.
  */
 
-export const EXPR_TYPES = Object.freeze({
-  LITERAL: 'literal',
-  IDENT: 'ident',
-  UNARY: 'unary',
-  BINARY: 'binary',
-  ARRAY_LITERAL: 'array_literal',
-  ARRAY_ACCESS: 'array_access',
-  ARRAY_UPDATE: 'array_update',
-  MEMBER_ACCESS: 'member_access',
-  FUNCTION_CALL: 'function_call',
-  STRING_CONCAT: 'string_concat',
-  RAW: 'raw',
-});
+import { parseExpression, NODE } from '../engine/expressionParser.js';
+
+export const EXPR_TYPES = NODE;
 
 /** @typedef {object} IRExpression */
 
 /**
  * Parse a source expression string into an IR expression tree.
- * Used by language parsers when they encounter inline expressions.
  */
-export function parseExpressionString(expr, scope = {}) {
-  const trimmed = (expr ?? '').trim();
-  if (!trimmed) return { type: EXPR_TYPES.LITERAL, value: undefined };
-
-  if (/^["'].*["']$/.test(trimmed)) {
-    return { type: EXPR_TYPES.LITERAL, value: trimmed.slice(1, -1) };
-  }
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return { type: EXPR_TYPES.LITERAL, value: Number(trimmed) };
-  }
-  if (/^(true|false)$/i.test(trimmed)) {
-    return { type: EXPR_TYPES.LITERAL, value: trimmed.toLowerCase() === 'true' };
-  }
-  if (trimmed === 'null') {
-    return { type: EXPR_TYPES.LITERAL, value: null };
-  }
-
-  const arrayMatch = trimmed.match(/^\[(.*)\]$/s) || trimmed.match(/^\{(.*)\}$/s);
-  if (arrayMatch) {
-    const inner = arrayMatch[1].trim();
-    if (!inner) return { type: EXPR_TYPES.ARRAY_LITERAL, elements: [] };
-    const elements = splitTopLevelCommas(inner).map((part) => parseExpressionString(part.trim(), scope));
-    return { type: EXPR_TYPES.ARRAY_LITERAL, elements };
-  }
-
-  const indexMatch = trimmed.match(/^(\w+)\s*\[\s*(.+?)\s*\]$/);
-  if (indexMatch) {
-    return {
-      type: EXPR_TYPES.ARRAY_ACCESS,
-      array: { type: EXPR_TYPES.IDENT, name: indexMatch[1] },
-      index: parseExpressionString(indexMatch[2], scope),
-    };
-  }
-
-  const binOps = [
-    ['//', 'FLOOR_DIV'],
-    ['+', 'ADD'],
-    ['-', 'SUBTRACT'],
-    ['*', 'MULTIPLY'],
-    ['/', 'DIVIDE'],
-    ['%', 'MODULO'],
-  ];
-  for (const [sym, op] of binOps) {
-    const idx = findTopLevelOperator(trimmed, sym);
-    if (idx >= 0) {
-      return {
-        type: EXPR_TYPES.BINARY,
-        op,
-        left: parseSubExpression(trimmed.slice(0, idx).trim(), scope),
-        right: parseSubExpression(trimmed.slice(idx + sym.length).trim(), scope),
-      };
-    }
-  }
-
-  if (/^[a-zA-Z_]\w*$/.test(trimmed)) {
-    return { type: EXPR_TYPES.IDENT, name: trimmed };
-  }
-
-  return { type: EXPR_TYPES.RAW, source: trimmed };
-}
-
-function parseSubExpression(part, scope) {
-  const trimmed = part.trim();
-  if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
-    let depth = 0;
-    let wraps = true;
-    for (let i = 0; i < trimmed.length; i += 1) {
-      if (trimmed[i] === '(') depth += 1;
-      if (trimmed[i] === ')') depth -= 1;
-      if (depth === 0 && i < trimmed.length - 1) {
-        wraps = false;
-        break;
-      }
-    }
-    if (wraps) return parseExpressionString(trimmed.slice(1, -1), scope);
-  }
-  return parseExpressionString(trimmed, scope);
+export function parseExpressionString(expr) {
+  return parseExpression(expr);
 }
 
 export function splitTopLevelCommas(str) {
@@ -131,28 +61,28 @@ export function splitTopLevelCommas(str) {
   return parts;
 }
 
-function findTopLevelOperator(expr, op) {
-  let quote = null;
-  let depth = 0;
-  for (let i = expr.length - op.length; i >= 0; i -= 1) {
-    const ch = expr[i];
-    if (quote) {
-      if (ch === quote && expr[i - 1] !== '\\') quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (')]}'.includes(ch)) depth += 1;
-    if ('([{'.includes(ch)) depth -= 1;
-    if (depth === 0 && expr.slice(i, i + op.length) === op) {
-      if (op === '-' && i > 0 && /[\d\w)]/.test(expr[i - 1])) continue;
-      return i;
-    }
-  }
-  return -1;
-}
+// Maps the evaluator's internal binary opcode names back to their source symbols,
+// purely for human-readable reconstructions (explain/explanations.js) — the opcode
+// name itself (`expr.op`) is untouched and still drives evaluation.
+const BINARY_OP_SYMBOLS = {
+  ADD: '+',
+  SUBTRACT: '-',
+  MULTIPLY: '*',
+  DIVIDE: '/',
+  MODULO: '%',
+  FLOOR_DIV: '//',
+  EQ: '==',
+  NEQ: '!=',
+  LT: '<',
+  LTE: '<=',
+  GT: '>',
+  GTE: '>=',
+  BITAND: '&',
+  BITOR: '|',
+  BITXOR: '^',
+  SHL: '<<',
+  SHR: '>>',
+};
 
 export function exprToString(expr) {
   if (!expr) return '';
@@ -162,14 +92,30 @@ export function exprToString(expr) {
     case EXPR_TYPES.IDENT:
       return expr.name;
     case EXPR_TYPES.BINARY:
-      return `${exprToString(expr.left)} ${expr.op} ${exprToString(expr.right)}`;
+      return `${exprToString(expr.left)} ${BINARY_OP_SYMBOLS[expr.op] ?? expr.op} ${exprToString(expr.right)}`;
+    case EXPR_TYPES.LOGICAL:
+      return `${exprToString(expr.left)} ${expr.op === 'AND' ? '&&' : '||'} ${exprToString(expr.right)}`;
+    case EXPR_TYPES.UNARY:
+      return `${expr.op === 'NEGATE' ? '-' : expr.op === 'NOT' ? '!' : '~'}${exprToString(expr.operand)}`;
+    case EXPR_TYPES.PRE_INCDEC:
+      return `${expr.op === 'INC' ? '++' : '--'}${exprToString(expr.operand)}`;
+    case EXPR_TYPES.POST_INCDEC:
+      return `${exprToString(expr.operand)}${expr.op === 'INC' ? '++' : '--'}`;
+    case EXPR_TYPES.ASSIGN:
+      return `${exprToString(expr.target)} ${expr.op} ${exprToString(expr.value)}`;
+    case EXPR_TYPES.TERNARY:
+      return `${exprToString(expr.cond)} ? ${exprToString(expr.then)} : ${exprToString(expr.else)}`;
     case EXPR_TYPES.ARRAY_LITERAL:
       return `[${expr.elements.map(exprToString).join(', ')}]`;
     case EXPR_TYPES.ARRAY_ACCESS:
       return `${exprToString(expr.array)}[${exprToString(expr.index)}]`;
-    case EXPR_TYPES.RAW:
+    case EXPR_TYPES.CALL:
+      return `${exprToString(expr.callee)}(${expr.args.map(exprToString).join(', ')})`;
+    case EXPR_TYPES.UNSUPPORTED:
       return expr.source;
     default:
       return String(expr);
   }
 }
+
+export default { EXPR_TYPES, parseExpressionString, splitTopLevelCommas, exprToString };

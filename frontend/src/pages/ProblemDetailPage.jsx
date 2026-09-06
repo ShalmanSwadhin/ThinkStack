@@ -40,6 +40,7 @@ export default function ProblemDetailPage() {
     isSubmitting,
     error,
     comingSoon,
+    mockMode,
     editorTheme,
     setSourceCode,
     setLanguage,
@@ -162,11 +163,12 @@ export default function ProblemDetailPage() {
                   : null
               }
               isRunning={isRunning}
+              mockMode={mockMode}
             />
           </div>
 
           {submitResult && (
-            <SubmissionResult submission={submitResult} xpAwarded={lastXpAwarded} />
+            <SubmissionResult submission={submitResult} xpAwarded={lastXpAwarded} mockMode={mockMode} />
           )}
 
           {submissions.length > 0 && (

@@ -1,5 +1,5 @@
 import { CODE_LANGUAGES, DEFAULT_CODE_LANGUAGE, getMonacoLanguage } from './languages.js';
-import { enrichStepsWithCodeSync } from './lineMapper.js';
+import { enrichStepsWithCodeSync, inferCodeLine } from './lineMapper.js';
 import {
   getAlgorithmCode,
   getStepCodeExplanation,
@@ -11,6 +11,7 @@ export {
   DEFAULT_CODE_LANGUAGE,
   getMonacoLanguage,
   enrichStepsWithCodeSync,
+  inferCodeLine,
   getAlgorithmCode,
   getStepCodeExplanation,
   transformPseudocodeLines,
@@ -21,6 +22,7 @@ export default {
   DEFAULT_CODE_LANGUAGE,
   getMonacoLanguage,
   enrichStepsWithCodeSync,
+  inferCodeLine,
   getAlgorithmCode,
   getStepCodeExplanation,
   transformPseudocodeLines,

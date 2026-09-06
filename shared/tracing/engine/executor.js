@@ -4,12 +4,15 @@
  */
 
 import { IR_OPCODES } from '../ir/opcodes.js';
-import { createRuntime } from './runtime.js';
+import { createRuntime, setVarType, getLanguage, drainSideEffects } from './runtime.js';
+import { parseExpression } from './expressionParser.js';
+import { normalizeDeclaredType } from './typeSystem.js';
 import {
   evaluateExpr,
   evaluateRawExpression,
   evaluateCondition,
   evaluatePrintArgs,
+  evaluatePrintf,
   formatValue,
 } from './evaluator.js';
 import { createStepEmitter } from '../visualizer/stepEmitter.js';
@@ -17,7 +20,7 @@ import { createStepEmitter } from '../visualizer/stepEmitter.js';
 export const MAX_TRACE_STEPS = 15000;
 
 export function executeIR(program) {
-  const runtime = createRuntime();
+  const runtime = createRuntime(program.language);
   const steps = [];
   const { pushStep } = createStepEmitter(runtime, steps, MAX_TRACE_STEPS);
   const instructions = program.instructions;
@@ -28,6 +31,39 @@ export function executeIR(program) {
 
   let ip = 0;
   const loopStack = [];
+  // Tracks open if/elif/else chains: when execution reaches the end of a TAKEN
+  // clause's own body, it must skip past every remaining clause in the chain
+  // (`chainEndIndex`) rather than falling through into the next clause's condition
+  // check/body — see parsers/blockParser.js's `parseIfChain` for why that fallthrough
+  // used to silently run every branch past the first.
+  const ifStack = [];
+
+  // BREAK/CONTINUE/RETURN can jump execution past an open if/elif/else chain
+  // without ever naturally reaching the end of its taken clause (e.g. `break`
+  // inside an `if` inside a `for`) — any ifStack frame whose scope is now entirely
+  // behind the new `ip` must be discarded outright, NOT redirected through its
+  // `chainEndIndex` (which would otherwise incorrectly jump execution backward,
+  // since `advancePastClosedBlocks` only checks "did ip pass this frame's end",
+  // not "did we get there via normal fallthrough vs. an explicit jump").
+  const discardStaleIfFrames = (targetIp) => {
+    while (ifStack.length && ifStack.at(-1).bodyEndIndex < targetIp) {
+      ifStack.pop();
+    }
+  };
+
+  const advancePastClosedBlocks = () => {
+    for (;;) {
+      if (ifStack.length && ip > ifStack.at(-1).bodyEndIndex) {
+        ip = ifStack.pop().chainEndIndex;
+        continue;
+      }
+      if (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
+        continueLoops();
+        continue;
+      }
+      break;
+    }
+  };
 
   const continueLoops = () => {
     if (!loopStack.length) return false;
@@ -60,7 +96,7 @@ export function executeIR(program) {
     }
 
     if (frame.type === 'c-for') {
-      applyIncrement(frame.increment, runtime.scope, pushStep, instructions[frame.headerIndex]);
+      applyIncrement(frame.increment, runtime.scope);
       const pass = evaluateCondition(frame.condition, runtime.scope);
       pushStep(instructions[frame.headerIndex], {
         condition: `${frame.conditionSource ?? frame.condition} → ${pass}`,
@@ -74,11 +110,13 @@ export function executeIR(program) {
   };
 
   while (ip < instructions.length) {
-    while (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-      if (!continueLoops()) break;
-    }
+    advancePastClosedBlocks();
 
     const inst = instructions[ip];
+    // Clear any side effects (`++`/`--` on a variable other than this instruction's
+    // own top-level target) left over from a previous instruction, so the drain
+    // after evaluating THIS instruction reflects only what just happened.
+    drainSideEffects(runtime.scope);
 
     switch (inst.op) {
       case IR_OPCODES.COMMENT:
@@ -95,16 +133,42 @@ export function executeIR(program) {
       case IR_OPCODES.DECLARE_VARIABLE:
       case IR_OPCODES.ASSIGN: {
         const prev = runtime.scope[inst.target];
+        // The runtime — not the parser's per-line syntactic guess — is the source of
+        // truth for "is this the FIRST time this name is bound" (a declaration) vs.
+        // "this name already exists" (an update). This matters most for languages
+        // with no declaration keyword at all (Python: `x = 5` looks identical whether
+        // `x` is brand new or being reassigned for the tenth time), but is checked for
+        // every language so the same rule applies everywhere.
+        const isDeclaration = !runtime.declaredNames.has(inst.target);
+        runtime.declaredNames.add(inst.target);
+        // An explicit declared type (from `int x = ...`, `float x = ...`, etc.) must be
+        // recorded BEFORE the value expression is evaluated, so that when the RHS'
+        // implicit `target = expr` assignment node reads the target's current kind it
+        // sees the DECLARED type rather than falling back to the literal's inferred
+        // kind (e.g. `float a = 25;` must stay `float`, not become `int` from `25`).
+        if (inst.declaredType) setVarType(runtime.scope, inst.target, inst.declaredType);
         let value = inst.valueExpr ? evaluateExpr(inst.valueExpr, runtime.scope) : undefined;
         if (value === undefined && inst.valueSource) {
           value = evaluateRawExpression(inst.valueSource, runtime.scope);
         }
         runtime.scope[inst.target] = value;
-        pushStep(inst, { target: inst.target, changed: inst.target, previousValue: prev });
+        // Side effects recorded here are ones embedded in the RHS expression on a
+        // variable OTHER than `inst.target` itself (e.g. the `i++` inside
+        // `sum = sum / i++`) — the assignment to `inst.target` is described directly
+        // via `target`/`previousValue` above, not as a "side effect".
+        const sideEffects = drainSideEffects(runtime.scope);
+        pushStep(inst, {
+          target: inst.target,
+          changed: inst.target,
+          previousValue: prev,
+          isDeclaration,
+          sideEffects,
+          declaratorIndex: inst.declaratorIndex,
+          declaratorCount: inst.declaratorCount,
+          declaratorNames: inst.declaratorNames,
+        });
         ip += 1;
-        while (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-          if (!continueLoops()) break;
-        }
+        advancePastClosedBlocks();
         break;
       }
 
@@ -119,34 +183,59 @@ export function executeIR(program) {
         if (Array.isArray(arr) && Number.isFinite(idx)) {
           arr[Math.floor(idx)] = value;
         }
-        pushStep(inst, { target: inst.arrayName, index: idx, newValue: value });
+        const sideEffects = drainSideEffects(runtime.scope);
+        pushStep(inst, { target: inst.arrayName, index: idx, newValue: value, sideEffects });
         ip += 1;
-        while (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-          if (!continueLoops()) break;
-        }
+        advancePastClosedBlocks();
         break;
       }
 
-      case IR_OPCODES.INCREMENT:
+      case IR_OPCODES.INCREMENT: {
+        // A standalone expression-statement with its own side effect: `i++;`,
+        // `++i;`, or a bare function call `foo();`. `valueExpr` (a pre-parsed AST
+        // node) is used when the parser recognized one of those forms directly;
+        // `incrementSource`/`sourceLine` (a raw string re-parsed by `applyIncrement`)
+        // remains for callers that only have source text on hand.
+        if (inst.valueExpr) {
+          evaluateExpr(inst.valueExpr, runtime.scope);
+        } else {
+          applyIncrement(inst.incrementSource ?? inst.sourceLine, runtime.scope);
+        }
+        const sideEffects = drainSideEffects(runtime.scope);
+        pushStep(inst, { sideEffects });
+        ip += 1;
+        advancePastClosedBlocks();
+        break;
+      }
+
       case IR_OPCODES.LOOP_INCREMENT: {
-        applyIncrement(inst.incrementSource ?? inst.sourceLine, runtime.scope, pushStep, inst);
+        applyIncrement(inst.incrementSource ?? inst.sourceLine, runtime.scope);
+        pushStep(inst);
         ip += 1;
         break;
       }
 
       case IR_OPCODES.PRINT: {
-        const text = inst.argsExpr
-          ? evaluatePrintArgs(inst.argsExpr, runtime.scope)
-          : evaluatePrintArgs(
-              (inst.argsSource ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-              runtime.scope
-            );
+        // `printf("sum=%5d i=%d\n", --sum, ++i)` carries its own format string and must
+        // be interpolated positionally (field widths, %x/%c/etc.) rather than the plain
+        // space-joined rendering every other print style (print/console.log/cout) uses.
+        const text = inst.formatSource
+          ? evaluatePrintf(inst.formatSource, inst.argsExpr, runtime.scope)
+          : inst.argsExpr
+            ? evaluatePrintArgs(inst.argsExpr, runtime.scope)
+            : evaluatePrintArgs(
+                (inst.argsSource ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+                runtime.scope
+              );
         runtime.output.push(text);
-        pushStep(inst);
+        // Side effects here are `++`/`--` embedded in the print arguments themselves
+        // (`printf(..., --sum, ++i)`, `printf(..., sum++, i--)`) — each recorded
+        // effect's `usedValue` is what was actually printed, which for postfix is
+        // the OLD value even though the variable now holds the new one.
+        const sideEffects = drainSideEffects(runtime.scope);
+        pushStep(inst, { sideEffects });
         ip += 1;
-        while (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-          if (!continueLoops()) break;
-        }
+        advancePastClosedBlocks();
         break;
       }
 
@@ -178,7 +267,7 @@ export function executeIR(program) {
       }
 
       case IR_OPCODES.FOR_LOOP: {
-        if (inst.initSource) applyIncrement(inst.initSource, runtime.scope, pushStep, inst);
+        if (inst.initSource) applyIncrement(inst.initSource, runtime.scope);
         const pass = evaluateCondition(inst.conditionSource ?? inst.conditionExpr, runtime.scope);
         if (!pass) {
           pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → false (loop finished)` });
@@ -275,9 +364,7 @@ export function executeIR(program) {
         }
         pushStep(inst, { target: arrName, changed: arrName });
         ip += 1;
-        while (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-          if (!continueLoops()) break;
-        }
+        advancePastClosedBlocks();
         break;
       }
 
@@ -286,9 +373,16 @@ export function executeIR(program) {
         const pass = isElse ? true : evaluateCondition(inst.conditionSource ?? inst.conditionExpr, runtime.scope);
         pushStep(inst, { condition: isElse ? 'else → true' : `${inst.conditionSource ?? 'condition'} → ${pass}` });
         if (pass) {
+          // Once this clause's own body finishes, skip every remaining elif/else
+          // clause in the chain rather than falling through into their condition
+          // checks/bodies (a chain with no elif/else has chainEndIndex === bodyEndIndex + 1,
+          // so this is a harmless same-target jump in that case).
+          if (inst.bodyEndIndex !== undefined && inst.chainEndIndex !== undefined) {
+            ifStack.push({ bodyEndIndex: inst.bodyEndIndex, chainEndIndex: inst.chainEndIndex });
+          }
           ip = inst.thenStartIndex;
         } else {
-          ip = inst.elseStartIndex ?? inst.endIndex + 1;
+          ip = inst.nextClauseIndex ?? inst.chainEndIndex ?? inst.elseStartIndex ?? inst.endIndex + 1;
         }
         break;
       }
@@ -300,6 +394,7 @@ export function executeIR(program) {
         } else {
           ip += 1;
         }
+        discardStaleIfFrames(ip);
         pushStep(inst);
         break;
       }
@@ -310,6 +405,7 @@ export function executeIR(program) {
         } else {
           ip += 1;
         }
+        discardStaleIfFrames(ip);
         pushStep(inst);
         break;
       }
@@ -317,6 +413,7 @@ export function executeIR(program) {
       case IR_OPCODES.RETURN:
         pushStep(inst);
         ip = instructions.length;
+        discardStaleIfFrames(ip);
         break;
 
       default:
@@ -329,30 +426,33 @@ export function executeIR(program) {
   return { steps, language: program.language, lineCount: program.lineCount };
 }
 
-function applyIncrement(source, scope, pushStep, inst) {
+// Matches the same leading type-keyword ThinkStack's C-style `for (int i = 0; ...)`
+// init clause carries, so it can be stripped before parsing (the expression parser
+// has no notion of a declaration keyword) while still recording the declared type.
+const LEADING_TYPE_KEYWORD = /^(const|let|var|int|long|short|byte|float|double|char|bool|boolean|string|String|auto)\s+/;
+
+/**
+ * Handles standalone `i++;`/`++i;` statements and C-style for-loop init/increment
+ * clauses (`for (int i = 0; i < n; i++)`). Now routes through the same tokenizer/
+ * parser/type-aware evaluator as every other expression instead of its own separate
+ * regex-only logic, so a for-loop's declared index type is tracked correctly (e.g.
+ * `for (int i = 0; i < n; i++) { x = 10 / i; }` must truncate-divide by `i`).
+ */
+function applyIncrement(source, scope) {
   const trimmed = (source ?? '').trim().replace(/;$/, '');
-  const postInc = trimmed.match(/^(\w+)\+\+$/);
-  if (postInc) {
-    scope[postInc[1]] = (scope[postInc[1]] ?? 0) + 1;
-    return;
+  if (!trimmed) return;
+
+  const typeMatch = trimmed.match(LEADING_TYPE_KEYWORD);
+  const stripped = typeMatch ? trimmed.slice(typeMatch[0].length) : trimmed;
+
+  if (typeMatch) {
+    const identMatch = stripped.match(/^([a-zA-Z_]\w*)\s*=/);
+    if (identMatch) {
+      setVarType(scope, identMatch[1], normalizeDeclaredType(typeMatch[1], getLanguage(scope)));
+    }
   }
-  const preInc = trimmed.match(/^\+\+(\w+)$/);
-  if (preInc) {
-    scope[preInc[1]] = (scope[preInc[1]] ?? 0) + 1;
-    return;
-  }
-  const incMatch = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
-  if (incMatch) {
-    scope[incMatch[1]] = evaluateRawExpression(incMatch[2], scope);
-    return;
-  }
-  const declMatch = trimmed.match(
-    /^(?:(?:const|let|var|int|long|float|double|char|string|auto)\s+)?([a-zA-Z_]\w*(?:\[\])?)\s*=\s*(.+)$/
-  );
-  if (declMatch) {
-    const target = declMatch[1].replace('[]', '');
-    scope[target] = evaluateRawExpression(declMatch[2], scope);
-  }
+
+  evaluateExpr(parseExpression(stripped), scope);
 }
 
 export default { executeIR, MAX_TRACE_STEPS };

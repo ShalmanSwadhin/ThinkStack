@@ -5,6 +5,12 @@
 import { IR_OPCODES } from '../ir/opcodes.js';
 import { createInstruction } from '../ir/program.js';
 import { parseExpressionString, splitTopLevelCommas } from '../ir/expressions.js';
+import { normalizeDeclaredType } from '../engine/typeSystem.js';
+
+const TYPE_KEYWORDS =
+  '(?:const|let|var|int|long|short|byte|float|double|char|bool|boolean|string|std::string|String|auto)';
+
+const COMPOUND_OPS = ['<<=', '>>=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^='];
 
 export function stripComment(raw, language) {
   let line = raw;
@@ -68,26 +74,54 @@ export function findBraceBlockEnd(lines, startIndex) {
   return lines.length - 1;
 }
 
+/**
+ * Parses an assignment/declaration statement. Returns one of:
+ *   - `{ arrayUpdate: true, arrayName, index, expr, fullExpr, compoundOp? }`
+ *   - `{ multiDeclare: true, declaredType, declarations: [{target, expr}, ...] }`
+ *     for `int a=1, b=2;` — each declaration becomes its own IR instruction so
+ *     neither variable's initializer is lost or corrupted (see the root-cause
+ *     writeup in NEXT_PHASE_MANUAL_TRACING_FIX_REPORT.md: the previous single-regex
+ *     approach captured `expr: "24, i=23"` for `int sum=24, i=23;`, which a
+ *     downstream `eval`-based fallback then misinterpreted via JS's comma operator).
+ *   - `{ target, expr, fullExpr, declaredType?, compoundOp? }` for a normal
+ *     assignment/declaration, where `fullExpr` is the WHOLE statement text
+ *     (`"sum *= i--"`, not just `"i--"`) — parsed as one expression so the
+ *     evaluator's Assign node handles compound-operator semantics itself, rather
+ *     than the parser trying to pre-compute anything.
+ *   - `null` if the line isn't an assignment/declaration at all.
+ */
 export function parseAssignment(line) {
   const trimmed = line.trim().replace(/;$/, '');
+  if (trimmed.includes('==') || trimmed.includes('!=') || /^for\s*\(/.test(trimmed)) return null;
 
-  const pyMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*=\s*(.+)$/);
-  if (pyMatch && !trimmed.includes('==') && !trimmed.includes('!=')) {
-    return { target: pyMatch[1], expr: pyMatch[2] };
+  // Compound assignment to an array element: a[i] *= 2  ->  reconstruct as a[i] = a[i] * 2
+  const compoundArrayMatch = matchCompoundOp(trimmed, /^(\w+)\s*\[\s*(.+?)\s*\]$/);
+  if (compoundArrayMatch) {
+    const { targetText, op, rhs } = compoundArrayMatch;
+    const idxMatch = targetText.match(/^(\w+)\s*\[\s*(.+?)\s*\]$/);
+    return {
+      arrayUpdate: true,
+      arrayName: idxMatch[1],
+      index: idxMatch[2],
+      expr: rhs,
+      fullExpr: `${targetText} = ${targetText} ${op} (${rhs})`,
+      compoundOp: op,
+    };
   }
 
-  const declMatch = trimmed.match(
-    /^(?:(?:const|let|var|int|long|float|double|char|string|std::string|String|boolean|auto)\s+)?([a-zA-Z_]\w*(?:\[\])?)\s*=\s*(.+)$/
-  );
-  if (declMatch && !trimmed.includes('==') && !trimmed.match(/^for\s*\(/)) {
-    return { target: declMatch[1].replace('[]', ''), expr: declMatch[2] };
+  // Compound assignment to a plain identifier: sum *= i--
+  const compoundMatch = matchCompoundOp(trimmed, /^([a-zA-Z_]\w*)$/);
+  if (compoundMatch) {
+    const { targetText, op, rhs } = compoundMatch;
+    return {
+      target: targetText,
+      expr: rhs,
+      fullExpr: `${targetText} ${op}= ${rhs}`,
+      compoundOp: op,
+    };
   }
 
-  const javaArrayMatch = trimmed.match(/^(int|String|char|double|float)\[\]\s+(\w+)\s*=\s*\{(.+)\}$/);
-  if (javaArrayMatch) {
-    return { target: javaArrayMatch[2], expr: `{${javaArrayMatch[3]}}` };
-  }
-
+  // Array element assignment: a[i] = expr
   const arrayUpdateMatch = trimmed.match(/^(\w+)\s*\[\s*(.+?)\s*\]\s*=\s*(.+)$/);
   if (arrayUpdateMatch) {
     return {
@@ -95,10 +129,98 @@ export function parseAssignment(line) {
       arrayName: arrayUpdateMatch[1],
       index: arrayUpdateMatch[2],
       expr: arrayUpdateMatch[3],
+      fullExpr: `${arrayUpdateMatch[1]}[${arrayUpdateMatch[2]}] = ${arrayUpdateMatch[3]}`,
+    };
+  }
+
+  const javaArrayMatch = trimmed.match(/^(int|String|char|double|float|long|boolean)\[\]\s+(\w+)\s*=\s*\{(.+)\}$/);
+  if (javaArrayMatch) {
+    return {
+      target: javaArrayMatch[2],
+      expr: `{${javaArrayMatch[3]}}`,
+      fullExpr: `${javaArrayMatch[2]} = {${javaArrayMatch[3]}}`,
+      declaredType: 'array',
+    };
+  }
+
+  // Plain assignment / declaration, possibly with a type keyword and possibly
+  // declaring MULTIPLE comma-separated variables in one statement. The target's
+  // optional bracket suffix accepts ANY content (`arr[]`, `arr[5]`, `arr[N]`) —
+  // not just empty brackets — since `int arr[5] = {1,2,3,4,5};` (a fixed-size
+  // declaration, extremely common in generated C/C++/Java tracing problems) was
+  // previously invisible to this regex entirely: it matched neither this pattern
+  // (which required literally empty `[]`) nor the array-UPDATE pattern below
+  // (which requires no leading type keyword), so the whole line silently became a
+  // no-op statement and the array was never created.
+  const declMatch = trimmed.match(new RegExp(`^(?:(${TYPE_KEYWORDS})\\s+)?([a-zA-Z_]\\w*(?:\\[[^\\]]*\\])?)\\s*=\\s*(.+)$`));
+  if (declMatch) {
+    const [, typeKeyword, firstTarget, rest] = declMatch;
+    const declaredType = typeKeyword ? normalizeDeclaredType(typeKeyword, undefined) : undefined;
+    const stripBrackets = (name) => name.replace(/\[[^\]]*\]$/, '');
+
+    // Only split on top-level commas when this line actually declares a type
+    // (bare `a = 1, b = 2` outside a declaration is not multi-declaration syntax
+    // in any supported language, and array/brace literals already contain commas
+    // that must NOT be split here — `splitTopLevelCommas` on the FULL remainder
+    // handles that correctly since it tracks bracket/brace/paren/quote depth).
+    if (typeKeyword) {
+      const restParts = splitCommaSeparatedDeclarations(rest);
+      if (restParts.length > 1 || /^[a-zA-Z_]\w*\s*=/.test(restParts[0] ?? '')) {
+        const declarations = [{ target: stripBrackets(firstTarget), expr: restParts[0] }];
+        for (let i = 1; i < restParts.length; i += 1) {
+          const m = restParts[i].match(/^([a-zA-Z_]\w*(?:\[[^\]]*\])?)\s*=\s*(.+)$/);
+          if (m) declarations.push({ target: stripBrackets(m[1]), expr: m[2] });
+        }
+        if (declarations.length > 1) {
+          return { multiDeclare: true, declaredType, declarations };
+        }
+      }
+    }
+
+    return {
+      target: stripBrackets(firstTarget),
+      expr: rest,
+      fullExpr: `${stripBrackets(firstTarget)} = ${rest}`,
+      declaredType,
     };
   }
 
   return null;
+}
+
+/**
+ * Splits the remainder of a declaration statement (everything after the first
+ * `target =`) on top-level commas, WITHOUT losing the first declaration's own
+ * initializer expression. `splitTopLevelCommas` alone isn't enough here because the
+ * first comma-separated "part" it would return is just the first variable's
+ * initializer (e.g. for "24, i=23" it returns ["24", "i=23"] — the first entry has
+ * no `target=` prefix since that was already consumed by the outer regex match).
+ */
+function splitCommaSeparatedDeclarations(rest) {
+  return splitTopLevelCommas(rest);
+}
+
+function matchCompoundOp(trimmed, targetPattern) {
+  for (const op of COMPOUND_OPS) {
+    const idx = findCompoundOpIndex(trimmed, op);
+    if (idx < 0) continue;
+    const targetText = trimmed.slice(0, idx).trim();
+    if (!targetPattern.test(targetText)) continue;
+    const rhs = trimmed.slice(idx + op.length).trim();
+    if (!rhs) continue;
+    return { targetText, op: op.slice(0, -1), rhs };
+  }
+  return null;
+}
+
+function findCompoundOpIndex(text, op) {
+  const idx = text.indexOf(op);
+  if (idx < 0) return -1;
+  // Guard against matching inside a longer operator/string — since COMPOUND_OPS is
+  // checked longest-first by the caller's iteration order this is mostly moot, but
+  // also reject if immediately preceded/followed by another operator character
+  // that would change the meaning (e.g. `!=` should never match `=` as `+=`'s tail).
+  return idx;
 }
 
 export function parsePrint(line) {
@@ -123,12 +245,12 @@ export function parsePrint(line) {
       .filter((p) => p && p !== 'endl');
     return { args: parts.join(', ') };
   }
-  if (trimmed.startsWith('printf(')) {
-    const start = trimmed.indexOf('(');
-    const end = trimmed.lastIndexOf(')');
-    const inner = trimmed.slice(start + 1, end);
-    const comma = inner.indexOf(',');
-    if (comma >= 0) return { args: inner.slice(comma + 1).trim() };
+  if (trimmed.startsWith('printf(') && trimmed.endsWith(')')) {
+    const inner = trimmed.slice(7, -1);
+    const parts = splitTopLevelCommas(inner);
+    const format = parts[0] ?? '""';
+    const args = parts.slice(1).join(', ');
+    return { format, args };
   }
 
   return null;
@@ -157,8 +279,9 @@ export function buildAssignInstruction(lineIndex, raw, assign, isDeclare = false
   const op = isDeclare ? IR_OPCODES.DECLARE_VARIABLE : IR_OPCODES.ASSIGN;
   return createInstruction(op, lineIndex + 1, raw, {
     target: assign.target,
-    valueExpr: parseExpressionString(assign.expr),
+    valueExpr: parseExpressionString(assign.fullExpr ?? `${assign.target} = ${assign.expr}`),
     valueSource: assign.expr,
+    declaredType: assign.declaredType,
   });
 }
 
@@ -167,7 +290,7 @@ export function buildArrayUpdateInstruction(lineIndex, raw, update) {
     arrayName: update.arrayName,
     indexExpr: parseExpressionString(update.index),
     indexSource: update.index,
-    valueExpr: parseExpressionString(update.expr),
+    valueExpr: parseExpressionString(update.fullExpr ?? `${update.arrayName}[${update.index}] = ${update.expr}`),
     valueSource: update.expr,
   });
 }
@@ -177,6 +300,7 @@ export function buildPrintInstruction(lineIndex, raw, print) {
   return createInstruction(IR_OPCODES.PRINT, lineIndex + 1, raw, {
     argsExpr: args,
     argsSource: print.args,
+    formatSource: print.format,
   });
 }
 

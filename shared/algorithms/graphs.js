@@ -310,6 +310,242 @@ const reconstruct = (cameFrom, current) => {
   return path;
 };
 
+const buildDirectedAdj = (edges) => {
+  const adj = {};
+  edges.forEach((edge) => {
+    if (!adj[edge.source]) adj[edge.source] = [];
+    adj[edge.source].push(edge.target);
+  });
+  return adj;
+};
+
+/** Kahn's algorithm — BFS-based topological sort using in-degree counts */
+export const topologicalSort = () => {
+  const steps = [];
+  const stats = initStats();
+  const adj = buildDirectedAdj(DEFAULT_GRAPH.edges);
+  const indegree = Object.fromEntries(DEFAULT_GRAPH.nodes.map((n) => [n.id, 0]));
+  DEFAULT_GRAPH.edges.forEach((edge) => {
+    indegree[edge.target] += 1;
+  });
+
+  withGraph(steps, stats, 'Compute in-degree of every node.', { nodes: [], edges: [] }, { visited: [] });
+
+  const queue = DEFAULT_GRAPH.nodes.filter((n) => indegree[n.id] === 0).map((n) => n.id);
+  const order = [];
+
+  while (queue.length) {
+    const node = queue.shift();
+    order.push(node);
+    stats.comparisons += 1;
+    withGraph(steps, stats, `Remove node ${node} (in-degree 0). Order so far: [${order.join(', ')}].`, { nodes: [node], edges: [] }, { visited: [...order] });
+
+    (adj[node] ?? []).forEach((next) => {
+      indegree[next] -= 1;
+      stats.comparisons += 1;
+      withGraph(steps, stats, `Decrement in-degree of ${next} to ${indegree[next]}.`, { nodes: [next], edges: [] }, { visited: [...order] });
+      if (indegree[next] === 0) queue.push(next);
+    });
+  }
+
+  withGraph(steps, stats, `Topological order: [${order.join(', ')}].`, { nodes: order, edges: [] }, { visited: order });
+  return steps;
+};
+
+/** Union-Find (Disjoint Set Union) with path compression — processes edges in given order, no weight sorting */
+export const unionFind = () => {
+  const steps = [];
+  const stats = initStats();
+  const parent = Object.fromEntries(DEFAULT_GRAPH.nodes.map((node) => [node.id, node.id]));
+  const unioned = [];
+
+  const find = (x, path = []) => {
+    if (parent[x] !== x) {
+      path.push(x);
+      return find(parent[x], path);
+    }
+    path.forEach((node) => {
+      parent[node] = x;
+    });
+    return x;
+  };
+
+  withGraph(steps, stats, 'Initialize each node as its own parent (singleton sets).', { nodes: [], edges: [] }, { mstEdges: [] });
+
+  DEFAULT_GRAPH.edges.forEach((edge) => {
+    const rootA = find(edge.source);
+    const rootB = find(edge.target);
+    stats.comparisons += 1;
+    if (rootA !== rootB) {
+      parent[rootA] = rootB;
+      unioned.push(edge.id);
+      withGraph(steps, stats, `Union(${edge.source}, ${edge.target}): different sets, merge them.`, { nodes: [edge.source, edge.target], edges: [edge.id] }, { mstEdges: [...unioned] });
+    } else {
+      withGraph(steps, stats, `Find(${edge.source}) == Find(${edge.target}): already connected, skip.`, { nodes: [], edges: [edge.id] }, { mstEdges: [...unioned] });
+    }
+  });
+
+  withGraph(steps, stats, 'Union-Find processing complete.', { nodes: DEFAULT_GRAPH.nodes.map((n) => n.id), edges: unioned }, { mstEdges: unioned });
+  return steps;
+};
+
+/** Kosaraju's algorithm — DFS finish order, then DFS on the transpose graph */
+export const kosarajuSCC = () => {
+  const steps = [];
+  const stats = initStats();
+  const adj = buildDirectedAdj(DEFAULT_GRAPH.edges);
+  const transposeAdj = {};
+  DEFAULT_GRAPH.edges.forEach((edge) => {
+    if (!transposeAdj[edge.target]) transposeAdj[edge.target] = [];
+    transposeAdj[edge.target].push(edge.source);
+  });
+
+  const visited = new Set();
+  const finishOrder = [];
+
+  withGraph(steps, stats, 'Pass 1: DFS on the original graph to compute finish order.', { nodes: [], edges: [] }, { visited: [] });
+
+  const dfs1 = (node) => {
+    visited.add(node);
+    stats.comparisons += 1;
+    withGraph(steps, stats, `Visit ${node} (pass 1).`, { nodes: [node], edges: [] }, { visited: [...visited] });
+    (adj[node] ?? []).forEach((next) => {
+      if (!visited.has(next)) dfs1(next);
+    });
+    finishOrder.push(node);
+    withGraph(steps, stats, `Finish ${node}. Finish order: [${finishOrder.join(', ')}].`, { nodes: [node], edges: [] }, { visited: [...visited] });
+  };
+  DEFAULT_GRAPH.nodes.forEach((n) => {
+    if (!visited.has(n.id)) dfs1(n.id);
+  });
+
+  withGraph(steps, stats, 'Pass 2: DFS on the transpose graph in reverse finish order.', { nodes: [], edges: [] }, { visited: [] });
+
+  const visited2 = new Set();
+  const components = [];
+  [...finishOrder].reverse().forEach((node) => {
+    if (visited2.has(node)) return;
+    const component = [];
+    const dfs2 = (u) => {
+      visited2.add(u);
+      component.push(u);
+      stats.comparisons += 1;
+      withGraph(steps, stats, `Visit ${u} (pass 2, component ${components.length + 1}).`, { nodes: [u], edges: [] }, { visited: [...visited2] });
+      (transposeAdj[u] ?? []).forEach((next) => {
+        if (!visited2.has(next)) dfs2(next);
+      });
+    };
+    dfs2(node);
+    components.push(component);
+    withGraph(steps, stats, `Component ${components.length}: [${component.join(', ')}].`, { nodes: component, edges: [] }, { visited: [...visited2] });
+  });
+
+  withGraph(steps, stats, `Strongly connected components: ${components.map((c) => `[${c.join(', ')}]`).join(', ')}.`, { nodes: [...visited2], edges: [] }, { visited: [...visited2] });
+  return steps;
+};
+
+/** Tarjan's bridge-finding algorithm (undirected) using discovery/low-link values */
+export const tarjanBridges = () => {
+  const steps = [];
+  const stats = initStats();
+  const adj = buildAdj(DEFAULT_GRAPH.edges);
+  const edgeIdOf = {};
+  DEFAULT_GRAPH.edges.forEach((e) => {
+    edgeIdOf[`${e.source}-${e.target}`] = e.id;
+    edgeIdOf[`${e.target}-${e.source}`] = e.id;
+  });
+
+  const disc = {};
+  const low = {};
+  const visited = new Set();
+  const bridges = [];
+  let timer = 0;
+
+  withGraph(steps, stats, 'DFS to compute discovery and low-link values for each node.', { nodes: [], edges: [] }, { visited: [] });
+
+  const dfs = (u, parentEdge) => {
+    visited.add(u);
+    disc[u] = low[u] = timer;
+    timer += 1;
+    withGraph(steps, stats, `Discover ${u} at time ${disc[u]}.`, { nodes: [u], edges: [] }, { visited: [...visited] });
+
+    (adj[u] ?? []).forEach((v) => {
+      const eid = edgeIdOf[`${u}-${v}`];
+      if (eid === parentEdge) return;
+      stats.comparisons += 1;
+      if (visited.has(v)) {
+        low[u] = Math.min(low[u], disc[v]);
+        withGraph(steps, stats, `Back edge ${u}-${v}: update low[${u}] = ${low[u]}.`, { nodes: [u, v], edges: [eid] }, { visited: [...visited] });
+      } else {
+        dfs(v, eid);
+        low[u] = Math.min(low[u], low[v]);
+        withGraph(steps, stats, `Back from ${v}: low[${u}] = min(low[${u}], low[${v}]) = ${low[u]}.`, { nodes: [u, v], edges: [eid] }, { visited: [...visited] });
+        if (low[v] > disc[u]) {
+          bridges.push(eid);
+          withGraph(steps, stats, `Edge ${u}-${v} is a bridge (low[${v}]=${low[v]} > disc[${u}]=${disc[u]}).`, { nodes: [u, v], edges: [eid] }, { visited: [...visited], mstEdges: [...bridges] });
+        }
+      }
+    });
+  };
+
+  DEFAULT_GRAPH.nodes.forEach((n) => {
+    if (!visited.has(n.id)) dfs(n.id, null);
+  });
+
+  withGraph(steps, stats, `Bridges found: ${bridges.length ? bridges.join(', ') : 'none'}.`, { nodes: [], edges: bridges }, { visited: [...visited], mstEdges: bridges });
+  return steps;
+};
+
+/** Tarjan's articulation points algorithm (undirected) using discovery/low-link values */
+export const tarjanArticulationPoints = () => {
+  const steps = [];
+  const stats = initStats();
+  const adj = buildAdj(DEFAULT_GRAPH.edges);
+  const disc = {};
+  const low = {};
+  const visited = new Set();
+  const articulation = new Set();
+  let timer = 0;
+
+  withGraph(steps, stats, 'DFS to compute discovery and low-link values for each node.', { nodes: [], edges: [] }, { visited: [] });
+
+  const dfs = (u, parent) => {
+    visited.add(u);
+    disc[u] = low[u] = timer;
+    timer += 1;
+    let children = 0;
+    withGraph(steps, stats, `Discover ${u} at time ${disc[u]}.`, { nodes: [u], edges: [] }, { visited: [...visited] });
+
+    (adj[u] ?? []).forEach((v) => {
+      if (v === parent) return;
+      stats.comparisons += 1;
+      if (visited.has(v)) {
+        low[u] = Math.min(low[u], disc[v]);
+      } else {
+        children += 1;
+        dfs(v, u);
+        low[u] = Math.min(low[u], low[v]);
+        if (parent !== null && low[v] >= disc[u] && !articulation.has(u)) {
+          articulation.add(u);
+          withGraph(steps, stats, `${u} is an articulation point (child ${v} cannot reach above ${u}).`, { nodes: [u], edges: [] }, { visited: [...visited], mstEdges: [...articulation] });
+        }
+      }
+    });
+
+    if (parent === null && children > 1 && !articulation.has(u)) {
+      articulation.add(u);
+      withGraph(steps, stats, `${u} is an articulation point (root with ${children} independent subtrees).`, { nodes: [u], edges: [] }, { visited: [...visited], mstEdges: [...articulation] });
+    }
+  };
+
+  DEFAULT_GRAPH.nodes.forEach((n) => {
+    if (!visited.has(n.id)) dfs(n.id, null);
+  });
+
+  withGraph(steps, stats, `Articulation points: ${articulation.size ? [...articulation].join(', ') : 'none'}.`, { nodes: [...articulation], edges: [] }, { visited: [...visited], mstEdges: [...articulation] });
+  return steps;
+};
+
 export default {
   dfs,
   bfs,
@@ -319,4 +555,9 @@ export default {
   prim,
   kruskal,
   astar,
+  topologicalSort,
+  unionFind,
+  kosarajuSCC,
+  tarjanBridges,
+  tarjanArticulationPoints,
 };

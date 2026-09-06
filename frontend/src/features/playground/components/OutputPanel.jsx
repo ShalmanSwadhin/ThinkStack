@@ -1,6 +1,6 @@
 import { VERDICT_COLORS, VERDICT_LABELS } from '../constants';
 
-export default function OutputPanel({ output, isRunning }) {
+export default function OutputPanel({ output, isRunning, mockMode }) {
   if (isRunning) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
@@ -21,6 +21,11 @@ export default function OutputPanel({ output, isRunning }) {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-auto p-4">
+      {mockMode && (
+        <div className="badge badge-warning w-fit" title="No real compiler is configured — this result is simulated and does not verify your code actually works.">
+          Mock execution — result is simulated, not verified
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <span className="font-medium text-slate-600 dark:text-slate-300">Verdict:</span>
         <span className={`font-semibold ${verdictClass}`}>

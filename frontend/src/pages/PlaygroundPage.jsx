@@ -138,7 +138,11 @@ export default function PlaygroundPage() {
               />
             </div>
             <div className="glass-card h-40 overflow-hidden">
-              <OutputPanel output={playground.output} isRunning={playground.isRunning} />
+              <OutputPanel
+                output={playground.output}
+                isRunning={playground.isRunning}
+                mockMode={playground.mockMode}
+              />
             </div>
           </div>
         </div>

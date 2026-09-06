@@ -31,6 +31,7 @@ export default function ContestProblemPage() {
     isSubmitting,
     error,
     comingSoon,
+    mockMode,
     editorTheme,
     setSourceCode,
     setLanguage,
@@ -179,6 +180,7 @@ export default function ContestProblemPage() {
                   stderr: runResult.stderr,
                   executionTime: runResult.executionTime,
                 }}
+                mockMode={mockMode}
               />
             </div>
           )}
@@ -189,6 +191,7 @@ export default function ContestProblemPage() {
                 testCasesPassed: submitResult.accepted ? 1 : 0,
                 testCasesTotal: 1,
               }}
+              mockMode={mockMode}
             />
           )}
         </div>

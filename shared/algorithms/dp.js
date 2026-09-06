@@ -109,9 +109,93 @@ export const lisDP = (input) => {
   return steps;
 };
 
+/** Bitmask DP — track achievable subset sums as bits of an integer (dp |= dp << num) to find the minimum partition difference */
+export const bitmaskDP = (input) => {
+  const arr = input.length ? input : [1, 6, 11, 5];
+  const total = arr.reduce((a, b) => a + b, 0);
+  const steps = [];
+  const stats = initStats();
+  let dpMask = 1n; // bit 0 (sum 0) is always achievable
+
+  const maskToArray = (mask) => {
+    const bits = [];
+    for (let i = 0; i <= total; i += 1) {
+      bits.push((mask & (1n << BigInt(i))) !== 0n ? 1 : 0);
+    }
+    return bits;
+  };
+
+  pushArrayStep(steps, stats, `Bitmask DP: track achievable subset sums of [${arr.join(', ')}] as bits (target total = ${total}).`, maskToArray(dpMask));
+
+  arr.forEach((num) => {
+    const before = dpMask;
+    dpMask |= dpMask << BigInt(num);
+    stats.swaps += 1;
+    pushArrayStep(steps, stats, `dp |= dp << ${num}  (newly achievable sums include +${num} to every previous achievable sum).`, maskToArray(dpMask), []);
+    void before;
+  });
+
+  let best = 0;
+  for (let s = Math.floor(total / 2); s >= 0; s -= 1) {
+    stats.comparisons += 1;
+    if ((dpMask & (1n << BigInt(s))) !== 0n) {
+      best = s;
+      break;
+    }
+  }
+  const difference = total - 2 * best;
+
+  finish(steps, stats, maskToArray(dpMask), `Best achievable half-sum = ${best}. Minimum partition difference = ${difference}.`);
+  return steps;
+};
+
+/** Real 2D edit-distance DP (Levenshtein), flattened row-by-row like the Knapsack demo above.
+ *  Two short "words" are derived deterministically from the numeric input (value % 26 -> letter). */
+export const editDistanceDP = (input) => {
+  const source = input.length ? input : [1, 2, 3, 4, 5, 6];
+  const mid = Math.max(1, Math.floor(source.length / 2));
+  const toWord = (nums) => nums.map((v) => String.fromCharCode(97 + (Math.abs(Math.trunc(v)) % 26)));
+  const word1 = toWord(source.slice(0, mid));
+  const word2 = toWord(source.slice(mid).length ? source.slice(mid) : source.slice(0, mid));
+  const m = word1.length;
+  const n = word2.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  const flat = [];
+  const steps = [];
+  const stats = initStats();
+
+  for (let i = 0; i <= m; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= n; j += 1) dp[0][j] = j;
+
+  pushArrayStep(steps, stats, `Edit distance DP table for "${word1.join('')}" -> "${word2.join('')}" (${m + 1}x${n + 1}).`, flat);
+
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      stats.comparisons += 1;
+      if (word1[i - 1] === word2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+        flat.length = 0;
+        flat.push(...dp[i]);
+        pushArrayStep(steps, stats, `'${word1[i - 1]}' == '${word2[j - 1]}': dp[${i}][${j}] = dp[${i - 1}][${j - 1}] = ${dp[i][j]} (no edit).`, flat, [j]);
+      } else {
+        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        stats.swaps += 1;
+        flat.length = 0;
+        flat.push(...dp[i]);
+        pushArrayStep(steps, stats, `'${word1[i - 1]}' != '${word2[j - 1]}': dp[${i}][${j}] = 1 + min(delete, insert, replace) = ${dp[i][j]}.`, flat, [j]);
+      }
+    }
+  }
+
+  finish(steps, stats, dp[m], `Edit distance("${word1.join('')}", "${word2.join('')}") = ${dp[m][n]}.`);
+  return steps;
+};
+
 export default {
   fibonacciMemo,
   knapsackDP,
   coinChangeDP,
   lisDP,
+  bitmaskDP,
+  editDistanceDP,
 };

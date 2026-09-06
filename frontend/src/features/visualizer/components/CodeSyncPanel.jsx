@@ -6,6 +6,7 @@ import {
   getAlgorithmCode,
   getMonacoLanguage,
   getStepCodeExplanation,
+  inferCodeLine,
 } from 'shared/algorithms/codeSync/index.js';
 import { cn } from '../../../utils/cn';
 import { createMonacoMountHandler, syncMonacoModel } from '../../../utils/monacoHelpers.js';
@@ -29,7 +30,18 @@ export default function CodeSyncPanel({
     [algorithmId, language, category]
   );
 
-  const currentLine = currentStep?.currentCodeLine ?? currentStep?.codeLine ?? 1;
+  // Computed live from the CURRENTLY selected `language`, not read from a value baked
+  // onto the step at generation time — steps are generated once per algorithm/input
+  // change and are NOT regenerated when the user switches the code-language dropdown
+  // (see VisualizerWorkspacePage.jsx), so a pre-baked line number would go stale and
+  // point at the wrong line the moment the language changes.
+  const currentLine = useMemo(
+    () =>
+      currentStep
+        ? inferCodeLine(algorithmId, category, currentStep.description, 0, 1, language)
+        : 1,
+    [algorithmId, category, currentStep, language]
+  );
   const monacoLanguage = getMonacoLanguage(language);
   const editorHeight = sideBySide ? 'min(360px, 50vh)' : '280px';
 

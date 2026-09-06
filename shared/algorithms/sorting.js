@@ -347,6 +347,89 @@ export const shellSort = (input) => {
   return steps;
 };
 
+const RUN = 4;
+
+const insertionSortRun = (arr, left, right, steps, stats) => {
+  for (let i = left + 1; i <= right; i += 1) {
+    const key = arr[i];
+    let j = i - 1;
+    while (j >= left) {
+      compare(stats, arr[j], key);
+      pushArrayStep(steps, stats, `Within run [${left}..${right}]: compare ${arr[j]} with key ${key}.`, arr, [j, i]);
+      if (arr[j] > key) {
+        arr[j + 1] = arr[j];
+        stats.swaps += 1;
+        j -= 1;
+      } else {
+        break;
+      }
+    }
+    arr[j + 1] = key;
+  }
+  pushArrayStep(steps, stats, `Run [${left}..${right}] sorted by insertion sort.`, arr, [], Array.from({ length: right - left + 1 }, (_, idx) => left + idx));
+};
+
+const mergeRuns = (arr, left, mid, right, steps, stats) => {
+  const leftPart = arr.slice(left, mid + 1);
+  const rightPart = arr.slice(mid + 1, right + 1);
+  pushArrayStep(steps, stats, `Merge runs [${left}..${mid}] and [${mid + 1}..${right}].`, arr, [], [left, right]);
+
+  let i = 0;
+  let j = 0;
+  let k = left;
+  while (i < leftPart.length && j < rightPart.length) {
+    compare(stats, leftPart[i], rightPart[j]);
+    if (leftPart[i] <= rightPart[j]) {
+      arr[k] = leftPart[i];
+      i += 1;
+    } else {
+      arr[k] = rightPart[j];
+      j += 1;
+    }
+    pushArrayStep(steps, stats, `Place ${arr[k]} at index ${k} while merging.`, arr, [k]);
+    k += 1;
+  }
+  while (i < leftPart.length) {
+    arr[k] = leftPart[i];
+    pushArrayStep(steps, stats, `Copy remaining left-run value ${arr[k]} to index ${k}.`, arr, [k]);
+    i += 1;
+    k += 1;
+  }
+  while (j < rightPart.length) {
+    arr[k] = rightPart[j];
+    pushArrayStep(steps, stats, `Copy remaining right-run value ${arr[k]} to index ${k}.`, arr, [k]);
+    j += 1;
+    k += 1;
+  }
+};
+
+/** Simplified Tim Sort: insertion-sort small runs, then merge runs pairwise (real hybrid, not a mergeSort alias) */
+export const timSort = (input) => {
+  const arr = [...input];
+  const steps = [];
+  const stats = initStats();
+  const n = arr.length;
+  pushArrayStep(steps, stats, `Starting Tim Sort with run size ${RUN}.`, arr);
+
+  for (let start = 0; start < n; start += RUN) {
+    const end = Math.min(start + RUN - 1, n - 1);
+    insertionSortRun(arr, start, end, steps, stats);
+  }
+
+  for (let size = RUN; size < n; size *= 2) {
+    for (let left = 0; left < n; left += 2 * size) {
+      const mid = Math.min(left + size - 1, n - 1);
+      const right = Math.min(left + 2 * size - 1, n - 1);
+      if (mid < right) {
+        mergeRuns(arr, left, mid, right, steps, stats);
+      }
+    }
+  }
+
+  finish(steps, stats, arr);
+  return steps;
+};
+
 export default {
   bubbleSort,
   selectionSort,
@@ -358,4 +441,5 @@ export default {
   radixSort,
   bucketSort,
   shellSort,
+  timSort,
 };

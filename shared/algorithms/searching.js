@@ -124,9 +124,108 @@ export const interpolationSearch = (input, target) => {
   return steps;
 };
 
+export const ternarySearch = (input, target) => {
+  const arr = [...input].sort((a, b) => a - b);
+  const steps = [];
+  const stats = initStats();
+  pushArrayStep(steps, stats, `Ternary search for ${target} on sorted array.`, arr);
+
+  let low = 0;
+  let high = arr.length - 1;
+
+  while (low <= high) {
+    const third = (high - low) / 3;
+    const mid1 = Math.floor(low + third);
+    const mid2 = Math.ceil(high - third);
+
+    compare(stats, arr[mid1], target);
+    pushArrayStep(steps, stats, `Check first third index ${mid1} (value ${arr[mid1]}).`, arr, [mid1, mid2], [low, high]);
+    if (arr[mid1] === target) {
+      pushArrayStep(steps, stats, `Target ${target} found at index ${mid1}.`, arr, [mid1]);
+      return steps;
+    }
+
+    compare(stats, arr[mid2], target);
+    pushArrayStep(steps, stats, `Check second third index ${mid2} (value ${arr[mid2]}).`, arr, [mid1, mid2], [low, high]);
+    if (arr[mid2] === target) {
+      pushArrayStep(steps, stats, `Target ${target} found at index ${mid2}.`, arr, [mid2]);
+      return steps;
+    }
+
+    if (target < arr[mid1]) {
+      high = mid1 - 1;
+      pushArrayStep(steps, stats, `Target is in the first third.`, arr, [], [low, high]);
+    } else if (target > arr[mid2]) {
+      low = mid2 + 1;
+      pushArrayStep(steps, stats, `Target is in the third third.`, arr, [], [low, high]);
+    } else {
+      low = mid1 + 1;
+      high = mid2 - 1;
+      pushArrayStep(steps, stats, `Target is in the middle third.`, arr, [], [low, high]);
+    }
+  }
+
+  pushArrayStep(steps, stats, `Target ${target} not found.`, arr);
+  return steps;
+};
+
+export const exponentialSearch = (input, target) => {
+  const arr = [...input].sort((a, b) => a - b);
+  const steps = [];
+  const stats = initStats();
+  pushArrayStep(steps, stats, `Exponential search for ${target} on sorted array.`, arr);
+
+  if (arr.length === 0) {
+    pushArrayStep(steps, stats, `Target ${target} not found.`, arr);
+    return steps;
+  }
+
+  compare(stats, arr[0], target);
+  pushArrayStep(steps, stats, `Check index 0 (value ${arr[0]}) as starting bound.`, arr, [0]);
+  if (arr[0] === target) {
+    pushArrayStep(steps, stats, `Target ${target} found at index 0.`, arr, [0]);
+    return steps;
+  }
+
+  let bound = 1;
+  while (bound < arr.length && arr[bound] <= target) {
+    compare(stats, arr[bound], target);
+    pushArrayStep(steps, stats, `Double range to index ${bound} (value ${arr[bound]}).`, arr, [bound], [0, bound]);
+    bound *= 2;
+  }
+
+  let low = Math.floor(bound / 2);
+  let high = Math.min(bound, arr.length - 1);
+  pushArrayStep(steps, stats, `Binary search within range [${low}, ${high}].`, arr, [], [low, high]);
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    compare(stats, arr[mid], target);
+    pushArrayStep(steps, stats, `Inspect middle index ${mid} (value ${arr[mid]}).`, arr, [mid], [low, high]);
+
+    if (arr[mid] === target) {
+      pushArrayStep(steps, stats, `Target ${target} found at index ${mid}.`, arr, [mid]);
+      return steps;
+    }
+
+    if (arr[mid] < target) {
+      low = mid + 1;
+      pushArrayStep(steps, stats, `Target is in right half.`, arr, [], [low, high]);
+    } else {
+      high = mid - 1;
+      pushArrayStep(steps, stats, `Target is in left half.`, arr, [], [low, high]);
+    }
+  }
+
+  pushArrayStep(steps, stats, `Target ${target} not found.`, arr);
+  return steps;
+};
+
 export default {
   linearSearch,
   binarySearch,
   jumpSearch,
   interpolationSearch,
+  ternarySearch,
+  exponentialSearch,
 };

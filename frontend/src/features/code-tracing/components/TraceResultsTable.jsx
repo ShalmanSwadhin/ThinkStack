@@ -121,7 +121,7 @@ function TraceTableContent({ model, currentStepIndex, forExport = false }) {
                       <td
                         key={cell.name}
                         className={cn(
-                          'border px-2 py-1.5 font-mono text-[11px]',
+                          'whitespace-pre-wrap border px-2 py-1.5 font-mono text-[11px]',
                           row.changed === cell.name &&
                             (forExport
                               ? 'bg-amber-50 font-semibold text-amber-900'
@@ -131,7 +131,10 @@ function TraceTableContent({ model, currentStepIndex, forExport = false }) {
                         {cell.value}
                       </td>
                     ))}
-                    <td className="border px-2 py-1.5 font-mono text-[11px]">{row.output}</td>
+                    {/* whitespace-pre-wrap: printf-style field widths (`%5d`) pad
+                        with literal spaces that a plain <td> (white-space: normal)
+                        would otherwise collapse away in the rendered page. */}
+                    <td className="whitespace-pre-wrap border px-2 py-1.5 font-mono text-[11px]">{row.output}</td>
                     <td
                       className={cn(
                         'border px-2 py-1.5 text-[11px]',

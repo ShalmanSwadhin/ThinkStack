@@ -1,12 +1,17 @@
 import { VERDICT_COLORS, VERDICT_LABELS } from '../../playground/constants';
 
-export default function SubmissionResult({ submission, xpAwarded }) {
+export default function SubmissionResult({ submission, xpAwarded, mockMode }) {
   if (!submission) return null;
 
   const verdictClass = VERDICT_COLORS[submission.verdict] ?? VERDICT_COLORS.pending;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+      {mockMode && (
+        <div className="badge badge-warning mb-3 w-fit" title="No real compiler is configured — this verdict is simulated and does not verify your code actually works.">
+          Mock execution — verdict is simulated, not verified
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <span className={`text-sm font-semibold ${verdictClass}`}>
           {VERDICT_LABELS[submission.verdict] ?? submission.verdict}

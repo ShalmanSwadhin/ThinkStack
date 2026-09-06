@@ -258,9 +258,166 @@ export const heapifyVisual = (input) => {
   return steps;
 };
 
+/** Silently builds a BST from values with no visualization steps (used as a base for traversal demos) */
+const buildBstQuiet = (values) => {
+  let root = null;
+  const insert = (node, value, parentId) => {
+    if (!node) return createNode(value, parentId);
+    if (value < node.value) node.left = insert(node.left, value, node.id);
+    else if (value > node.value) node.right = insert(node.right, value, node.id);
+    return node;
+  };
+  values.forEach((value) => {
+    root = insert(root, value, null);
+  });
+  return root;
+};
+
+const traversalDemo = (input, order, describeVisit) => {
+  nodeCounter = 0;
+  const values = input.length ? input : [50, 30, 70, 20, 40, 60, 80];
+  const root = buildBstQuiet(values);
+  const steps = [];
+  const stats = initStats();
+  const visitOrder = [];
+
+  snapshotTree(steps, stats, root, `Built binary search tree from [${values.join(', ')}].`, []);
+
+  const visit = (node) => {
+    if (!node) return;
+    if (order === 'pre') {
+      stats.comparisons += 1;
+      visitOrder.push(node.value);
+      snapshotTree(steps, stats, root, describeVisit(node.value, visitOrder), [node.id]);
+    }
+    if (node.left) visit(node.left);
+    if (order === 'in') {
+      stats.comparisons += 1;
+      visitOrder.push(node.value);
+      snapshotTree(steps, stats, root, describeVisit(node.value, visitOrder), [node.id]);
+    }
+    if (node.right) visit(node.right);
+    if (order === 'post') {
+      stats.comparisons += 1;
+      visitOrder.push(node.value);
+      snapshotTree(steps, stats, root, describeVisit(node.value, visitOrder), [node.id]);
+    }
+  };
+
+  visit(root);
+  snapshotTree(steps, stats, root, `Traversal complete: [${visitOrder.join(', ')}].`, []);
+  return steps;
+};
+
+export const treeInorder = (input) =>
+  traversalDemo(input, 'in', (value, order) => `Visit ${value} (inorder: left, node, right). Order so far: [${order.join(', ')}].`);
+
+export const treePreorder = (input) =>
+  traversalDemo(input, 'pre', (value, order) => `Visit ${value} (preorder: node, left, right). Order so far: [${order.join(', ')}].`);
+
+export const treePostorder = (input) =>
+  traversalDemo(input, 'post', (value, order) => `Visit ${value} (postorder: left, right, node). Order so far: [${order.join(', ')}].`);
+
+/** Level-order (BFS) traversal of a freshly-built BST */
+export const levelOrderTraversal = (input) => {
+  nodeCounter = 0;
+  const values = input.length ? input : [50, 30, 70, 20, 40, 60, 80];
+  const root = buildBstQuiet(values);
+  const steps = [];
+  const stats = initStats();
+  const visited = [];
+
+  snapshotTree(steps, stats, root, `Built binary search tree from [${values.join(', ')}].`, []);
+
+  const queue = root ? [root] : [];
+  while (queue.length) {
+    const node = queue.shift();
+    stats.comparisons += 1;
+    visited.push(node.value);
+    snapshotTree(steps, stats, root, `Dequeue and visit ${node.value}. Level order so far: [${visited.join(', ')}].`, [node.id]);
+    if (node.left) queue.push(node.left);
+    if (node.right) queue.push(node.right);
+  }
+
+  snapshotTree(steps, stats, root, `Level-order traversal complete: [${visited.join(', ')}].`, []);
+  return steps;
+};
+
+/** Segment tree build (bottom-up sum segment tree) + a range-sum query, shown as a tree */
+export const segmentTreeDemo = (input) => {
+  nodeCounter = 0;
+  const values = input.length ? input : [1, 3, 5, 7, 9, 11];
+  const n = values.length;
+  const size = 2 ** Math.ceil(Math.log2(Math.max(n, 1)));
+  const tree = new Array(2 * size).fill(0);
+  const steps = [];
+  const stats = initStats();
+
+  const idOf = (i) => `seg${i}`;
+  const asTreeState = (highlights = []) => {
+    const nodes = [];
+    for (let i = 1; i < size + n; i += 1) {
+      if (i >= size && i >= size + n) continue;
+      const depth = Math.floor(Math.log2(i));
+      const firstIndex = 2 ** depth;
+      const count = 2 ** depth;
+      const pos = i - firstIndex;
+      nodes.push({
+        id: idOf(i),
+        value: tree[i] ?? 0,
+        label: String(tree[i] ?? 0),
+        x: 60 + (760 / (count + 1)) * (pos + 1),
+        y: depth * 80 + 40,
+        parentId: i === 1 ? null : idOf(Math.floor(i / 2)),
+        highlighted: highlights.includes(i),
+        secondary: false,
+      });
+    }
+    return { nodes, rootId: nodes.length ? idOf(1) : null };
+  };
+
+  pushTreeStep(steps, stats, `Build segment tree for range-sum queries over [${values.join(', ')}].`, asTreeState());
+
+  for (let i = 0; i < n; i += 1) {
+    tree[size + i] = values[i];
+    pushTreeStep(steps, stats, `Place leaf value ${values[i]} at position ${i}.`, asTreeState([size + i]));
+  }
+
+  for (let i = size - 1; i >= 1; i -= 1) {
+    tree[i] = (tree[2 * i] ?? 0) + (tree[2 * i + 1] ?? 0);
+    stats.comparisons += 1;
+    pushTreeStep(steps, stats, `Internal node ${i} = left child + right child = ${tree[i]}.`, asTreeState([i]));
+  }
+
+  const ql = 0;
+  const qr = Math.min(3, n - 1);
+  let sum = 0;
+  const queryHighlights = [];
+  const query = (node, lo, hi) => {
+    if (qr < lo || hi < ql) return;
+    if (ql <= lo && hi <= qr) {
+      sum += tree[node];
+      queryHighlights.push(node);
+      return;
+    }
+    const mid = Math.floor((lo + hi) / 2);
+    query(2 * node, lo, mid);
+    query(2 * node + 1, mid + 1, hi);
+  };
+  query(1, 0, size - 1);
+  pushTreeStep(steps, stats, `Range sum query [${ql}, ${qr}] = ${sum}.`, asTreeState(queryHighlights));
+
+  return steps;
+};
+
 export default {
   bstInsert,
   avlInsert,
   trieInsert,
   heapifyVisual,
+  treeInorder,
+  treePreorder,
+  treePostorder,
+  levelOrderTraversal,
+  segmentTreeDemo,
 };

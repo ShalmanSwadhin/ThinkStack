@@ -127,11 +127,23 @@ export default function ManualTracingPage() {
 
 
 
+  // Switching languages loads that language's sample code (matching the "Load Example"
+  // button's behavior) rather than re-parsing whatever text is currently in the editor.
+  // The previous code called `parseNow(draft)` here, which fed the OLD language's leftover
+  // source text into the NEW language's parser (e.g. Python's `for num in numbers:` parsed
+  // as Java) — producing garbled variable values instead of a real error, since each
+  // language parser tries its best to make sense of unexpected tokens rather than failing
+  // outright. Confirmed live: this was the actual root cause of Manual Tracing appearing
+  // broken after a language switch (see NEXT_PHASE_QA_REPORT.md).
   useEffect(() => {
 
-    parseNow(draft);
+    const sample = SAMPLE_CODE[language] ?? SAMPLE_CODE.python;
 
-  }, [language]); // eslint-disable-line react-hooks/exhaustive-deps -- re-trace same draft under new language rules
+    setDraft(sample);
+
+    parseNow(sample);
+
+  }, [language]); // eslint-disable-line react-hooks/exhaustive-deps -- load & re-trace this language's sample
 
 
 
