@@ -6,7 +6,13 @@ import { createProgram } from '../ir/program.js';
 import { parseLines } from './common.js';
 import { parseStatementBlock } from './blockParser.js';
 
-const SKIP = [/^(public|private|protected|class|import|package|\{)\b/];
+const SKIP = [
+  { pattern: /^import\b/, directiveType: 'Module Directive', directiveSubtype: 'Import' },
+  { pattern: /^package\b/, directiveType: 'Module Directive', directiveSubtype: 'Package' },
+  { pattern: /^(public|private|protected)?\s*(static\s+)?(final\s+)?class\b/, directiveType: 'Class Declaration', directiveSubtype: 'Class' },
+  { pattern: /^(public|private|protected)\b/, directiveType: 'Statement', directiveSubtype: 'Modifier' },
+  { pattern: /^\{$/, directiveType: 'Block Marker', directiveSubtype: 'OpenBrace' },
+];
 
 export function parseJava(source) {
   const lines = parseLines(source);

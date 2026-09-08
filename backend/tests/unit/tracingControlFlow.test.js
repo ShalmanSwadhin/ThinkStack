@@ -324,3 +324,375 @@ describe('if/while/for headers with nested parentheses in their condition (audit
     expect(finalVars(code, 'c').flag).toBe(1);
   });
 });
+
+describe('Explicit trace events: Condition / Executed / Skipped (not generic "Statement")', () => {
+  function stepsFor(code, lang = 'c') {
+    return buildTracePlan(code, lang).steps;
+  }
+
+  it('1. if true: the if-header is a Condition step and its body is Executed; the else clause is explicitly marked Skipped', () => {
+    const code = wrapC('  int a = 10, b = 3, c = 5;\n  if (a > b && c < 10) {\n    b = b + a--;\n  } else {\n    c = c + b++;\n  }');
+    const steps = stepsFor(code);
+
+    const ifStep = steps.find((s) => s.sourceLine.includes('if (a > b'));
+    expect(ifStep.type).toBe('condition');
+    expect(ifStep.explanation).toMatch(/EXECUTED/);
+
+    const elseStep = steps.find((s) => s.sourceLine.trim() === '} else {');
+    expect(elseStep).toBeDefined();
+    expect(elseStep.type).toBe('condition');
+    expect(elseStep.explanation).toMatch(/SKIPPED/);
+
+    // The else body's own line must never appear as an executed step at all.
+    expect(steps.some((s) => s.sourceLine.includes('c + b++'))).toBe(false);
+
+    const finalVarsResult = extractFinalState(buildTracePlan(code, 'c')).variables;
+    expect(finalVarsResult).toEqual({ a: 9, b: 13, c: 5 });
+  });
+
+  it('2. if false: the if-header is Skipped and the else body actually executes', () => {
+    const code = wrapC('  int a = 1, b = 3, c = 5;\n  if (a > b && c < 10) {\n    b = b + a--;\n  } else {\n    c = c + b++;\n  }');
+    const steps = stepsFor(code);
+
+    const ifStep = steps.find((s) => s.sourceLine.includes('if (a > b'));
+    expect(ifStep.type).toBe('condition');
+    expect(ifStep.explanation).toMatch(/SKIPPED/);
+
+    const elseAssign = steps.find((s) => s.sourceLine.includes('c + b++'));
+    expect(elseAssign).toBeDefined();
+
+    // The if body's own line must never appear as an executed step at all.
+    expect(steps.some((s) => s.sourceLine.includes('b + a--'))).toBe(false);
+
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables).toEqual({ a: 1, b: 4, c: 8 });
+  });
+
+  it('3. nested if/else: each level reports its own Condition/Executed/Skipped independently', () => {
+    const code = wrapC(
+      [
+        '  int a = 10, b = 3, c = 5, result = 0;',
+        '  if (a > 5) {',
+        '    if (a > b && c < 10) {',
+        '      b = b + a--;',
+        '      result = 1;',
+        '    } else {',
+        '      c = c + b++;',
+        '      result = 2;',
+        '    }',
+        '  } else {',
+        '    result = 3;',
+        '  }',
+      ].join('\n')
+    );
+    const steps = stepsFor(code);
+    const outerIf = steps.find((s) => s.sourceLine.includes('if (a > 5)'));
+    const innerIf = steps.find((s) => s.sourceLine.includes('if (a > b'));
+    const innerElse = steps.find((s) => s.sourceLine.trim() === '} else {' && s.line > innerIf.line);
+    expect(outerIf.explanation).toMatch(/EXECUTED/);
+    expect(innerIf.explanation).toMatch(/EXECUTED/);
+    expect(innerElse.explanation).toMatch(/SKIPPED/);
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables).toEqual({ a: 9, b: 13, c: 5, result: 1 });
+  });
+
+  it('4. else-if chain: exactly one clause is Executed, every other clause is explicitly Skipped', () => {
+    const code = wrapC(
+      [
+        '  int x = 5, y = 0;',
+        '  if (x > 100) {',
+        '    y = 1;',
+        '  } else if (x > 50) {',
+        '    y = 2;',
+        '  } else if (x > 3) {',
+        '    y = 3;',
+        '  } else {',
+        '    y = 4;',
+        '  }',
+      ].join('\n')
+    );
+    const steps = stepsFor(code);
+    const conditionSteps = steps.filter((s) => s.type === 'condition');
+    expect(conditionSteps).toHaveLength(4); // if, else-if, else-if, else — all four clauses report in
+    // Use the structured `branchTaken` flag, not a substring match on the prose —
+    // the EXECUTED clause's own explanation also mentions "SKIPPED" (describing
+    // what happens to the clauses AFTER it), so a naive /SKIPPED/ regex would
+    // wrongly count it twice.
+    const executed = conditionSteps.filter((s) => s.branchTaken === true);
+    const skipped = conditionSteps.filter((s) => s.branchTaken === false);
+    expect(executed).toHaveLength(1);
+    expect(skipped).toHaveLength(3);
+    expect(executed[0].sourceLine).toContain('x > 3');
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables.y).toBe(3);
+  });
+
+  it('5. if inside a loop: Condition/Executed/Skipped is reported freshly on every iteration', () => {
+    const code = wrapC(
+      ['  int sum = 0;', '  for (int i = 0; i < 4; i++) {', '    if (i % 2 == 0) {', '      sum = sum + i;', '    } else {', '      sum = sum - i;', '    }', '  }'].join('\n')
+    );
+    const steps = stepsFor(code);
+    const conditionSteps = steps.filter((s) => s.sourceLine.includes('if (i % 2'));
+    expect(conditionSteps).toHaveLength(4); // once per iteration, i = 0,1,2,3
+    // +0 -1 +2 -3 = -2
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables.sum).toBe(-2);
+  });
+
+  it('6. loop inside if: the loop only runs at all when its enclosing branch is Executed', () => {
+    const trueBranchCode = wrapC(
+      ['  int flag = 1, total = 0;', '  if (flag == 1) {', '    for (int i = 0; i < 5; i++) {', '      total = total + i;', '    }', '  } else {', '    total = -1;', '  }'].join('\n')
+    );
+    expect(extractFinalState(buildTracePlan(trueBranchCode, 'c')).variables.total).toBe(10); // 0+1+2+3+4
+
+    const falseBranchCode = wrapC(
+      ['  int flag = 0, total = 0;', '  if (flag == 1) {', '    for (int i = 0; i < 5; i++) {', '      total = total + i;', '    }', '  } else {', '    total = -1;', '  }'].join('\n')
+    );
+    const steps = stepsFor(falseBranchCode);
+    // The for-loop header must never even appear as a step when its enclosing if is false.
+    expect(steps.some((s) => s.sourceLine.includes('for (int i'))).toBe(false);
+    expect(extractFinalState(buildTracePlan(falseBranchCode, 'c')).variables.total).toBe(-1);
+  });
+
+  it('7. break inside a conditional exits the loop, and the trace shows a real BREAK step', () => {
+    const code = wrapC(
+      ['  int i = 0, sum = 0;', '  for (i = 0; i < 10; i++) {', '    if (i == 4) {', '      break;', '    }', '    sum = sum + i;', '  }'].join('\n')
+    );
+    const steps = stepsFor(code);
+    expect(steps.some((s) => s.irOp === 'BREAK')).toBe(true);
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables).toEqual({ i: 4, sum: 6 }); // 0+1+2+3
+  });
+
+  it('8. continue inside a conditional skips only that iteration, and the trace shows a real CONTINUE step', () => {
+    const code = wrapC(
+      ['  int sum = 0;', '  for (int i = 0; i < 5; i++) {', '    if (i == 2) {', '      continue;', '    }', '    sum = sum + i;', '  }'].join('\n')
+    );
+    const steps = stepsFor(code);
+    expect(steps.some((s) => s.irOp === 'CONTINUE')).toBe(true);
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables.sum).toBe(8); // 0+1+3+4
+  });
+
+  it('9. return inside a conditional stops the ENTIRE trace at that point, not just the branch', () => {
+    const code = [
+      '#include<stdio.h>',
+      'int main() {',
+      '  int x = 10;',
+      '  if (x > 5) {',
+      '    x = 100;',
+      '    return 0;',
+      '  } else {',
+      '    x = 200;',
+      '  }',
+      '  x = 999;',
+      '  return 0;',
+      '}',
+    ].join('\n');
+    const steps = stepsFor(code);
+    expect(steps.some((s) => s.sourceLine.includes('x = 999'))).toBe(false);
+    expect(steps.some((s) => s.sourceLine.includes('x = 200'))).toBe(false);
+    expect(extractFinalState(buildTracePlan(code, 'c')).variables.x).toBe(100);
+  });
+});
+
+describe('Five self-authored tough stress cases (loop/if nesting-boundary audit)', () => {
+  // These specifically target the SHAPE of bug found while fixing "loop inside if":
+  // an if-chain frame and a loop frame can end at the EXACT SAME instruction (when
+  // the loop is the last/only thing in a taken branch), which previously caused the
+  // if-chain to be treated as "closed" on the loop's first iteration boundary
+  // instead of only once the loop had genuinely finished. Each case below is
+  // verified against an independent reference implementation in plain JS (not
+  // hand-derived arithmetic), so a failure here would mean the engine disagrees
+  // with real language semantics, not a mistaken expectation.
+
+  it('1. loop-inside-if repeated across outer loop iterations (the exact nesting shape that broke)', () => {
+    const code = wrapC(
+      [
+        '  int total = 0;',
+        '  for (int i = 0; i < 4; i++) {',
+        '    if (i % 2 == 0) {',
+        '      for (int j = 0; j < 3; j++) {',
+        '        total = total + j;',
+        '      }',
+        '    } else {',
+        '      total = total - 100;',
+        '    }',
+        '  }',
+      ].join('\n')
+    );
+    function reference() {
+      let total = 0;
+      for (let i = 0; i < 4; i++) {
+        if (i % 2 === 0) {
+          for (let j = 0; j < 3; j++) total = total + j;
+        } else {
+          total = total - 100;
+        }
+      }
+      return total;
+    }
+    expect(finalVars(code, 'c').total).toBe(reference());
+  });
+
+  it('2. if-inside-loop-inside-if, with both break and continue present', () => {
+    const code = wrapC(
+      [
+        '  int flag = 1, sum = 0;',
+        '  if (flag == 1) {',
+        '    for (int i = 0; i < 10; i++) {',
+        '      if (i == 7) {',
+        '        break;',
+        '      }',
+        '      if (i % 3 == 0) {',
+        '        continue;',
+        '      }',
+        '      sum = sum + i;',
+        '    }',
+        '  } else {',
+        '    sum = -999;',
+        '  }',
+      ].join('\n')
+    );
+    function reference() {
+      let sum = 0;
+      for (let i = 0; i < 10; i++) {
+        if (i === 7) break;
+        if (i % 3 === 0) continue;
+        sum = sum + i;
+      }
+      return sum;
+    }
+    expect(finalVars(code, 'c').sum).toBe(reference());
+  });
+
+  it('3. else-if chain where each branch is a DIFFERENT loop type (for/while), repeated via an outer loop', () => {
+    const code = wrapC(
+      [
+        '  int total = 0;',
+        '  for (int mode = 0; mode < 3; mode++) {',
+        '    if (mode == 0) {',
+        '      for (int k = 0; k < 4; k++) {',
+        '        total = total + 1;',
+        '      }',
+        '    } else if (mode == 1) {',
+        '      int w = 0;',
+        '      while (w < 3) {',
+        '        total = total + 10;',
+        '        w = w + 1;',
+        '      }',
+        '    } else {',
+        '      total = total + 1000;',
+        '    }',
+        '  }',
+      ].join('\n')
+    );
+    function reference() {
+      let total = 0;
+      for (let mode = 0; mode < 3; mode++) {
+        if (mode === 0) {
+          for (let k = 0; k < 4; k++) total = total + 1;
+        } else if (mode === 1) {
+          let w = 0;
+          while (w < 3) {
+            total = total + 10;
+            w = w + 1;
+          }
+        } else {
+          total = total + 1000;
+        }
+      }
+      return total;
+    }
+    expect(finalVars(code, 'c').total).toBe(reference());
+  });
+
+  it('4. three-level nested if/else, innermost true branch has a for-loop with break, all inside an outer loop', () => {
+    const code = wrapC(
+      [
+        '  int hits = 0;',
+        '  for (int n = 0; n < 5; n++) {',
+        '    if (n > 10) {',
+        '      hits = hits - 1000;',
+        '    } else {',
+        '      if (n % 2 == 0) {',
+        '        if (n < 100) {',
+        '          for (int m = 0; m < 10; m++) {',
+        '            if (m == n) {',
+        '              break;',
+        '            }',
+        '            hits = hits + 1;',
+        '          }',
+        '        } else {',
+        '          hits = hits - 1000;',
+        '        }',
+        '      } else {',
+        '        hits = hits + 1;',
+        '      }',
+        '    }',
+        '  }',
+      ].join('\n')
+    );
+    function reference() {
+      let hits = 0;
+      for (let n = 0; n < 5; n++) {
+        if (n > 10) {
+          hits = hits - 1000;
+        } else if (n % 2 === 0) {
+          if (n < 100) {
+            for (let m = 0; m < 10; m++) {
+              if (m === n) break;
+              hits = hits + 1;
+            }
+          } else {
+            hits = hits - 1000;
+          }
+        } else {
+          hits = hits + 1;
+        }
+      }
+      return hits;
+    }
+    expect(finalVars(code, 'c').hits).toBe(reference());
+  });
+
+  it('5. while-loop containing if/else whose true branch ends in a for-loop with continue (reverse nesting: loop > if > loop)', () => {
+    const code = wrapC(
+      [
+        '  int outerCount = 0, acc = 0;',
+        '  int x = 0;',
+        '  while (x < 4) {',
+        '    outerCount = outerCount + 1;',
+        '    if (x % 2 == 0) {',
+        '      for (int y = 0; y < 5; y++) {',
+        '        if (y % 2 != 0) {',
+        '          continue;',
+        '        }',
+        '        acc = acc + y;',
+        '      }',
+        '    } else {',
+        '      acc = acc - 1;',
+        '    }',
+        '    x = x + 1;',
+        '  }',
+      ].join('\n')
+    );
+    function reference() {
+      let outerCount = 0;
+      let acc = 0;
+      let x = 0;
+      while (x < 4) {
+        outerCount = outerCount + 1;
+        if (x % 2 === 0) {
+          for (let y = 0; y < 5; y++) {
+            if (y % 2 !== 0) continue;
+            acc = acc + y;
+          }
+        } else {
+          acc = acc - 1;
+        }
+        x = x + 1;
+      }
+      return { outerCount, acc, x };
+    }
+    // Subset check, not `toEqual` — this engine uses one flat scope for the whole
+    // trace (no real block-scoping), so the inner for-loop's `y` is also present
+    // in the final variables map; that's a known, documented limitation, not what
+    // this test is checking.
+    expect(finalVars(code, 'c')).toMatchObject(reference());
+  });
+});

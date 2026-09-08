@@ -56,8 +56,13 @@ export class GamificationService {
       dailyChallengeRepository.countCompletionsForUser(userId),
     ]);
 
+    // `badgeId` can populate to null if the referenced Badge was deleted/reseeded
+    // after this UserBadge record was created (a dangling reference) — skip those
+    // rather than crashing the whole profile fetch over stale join data.
     const earnedMap = new Map(
-      earnedBadges.map((entry) => [entry.badgeId._id.toString(), entry.earnedAt])
+      earnedBadges
+        .filter((entry) => entry.badgeId)
+        .map((entry) => [entry.badgeId._id.toString(), entry.earnedAt])
     );
 
     const badges = allBadges.map((badge) =>
@@ -248,7 +253,12 @@ export class GamificationService {
       return { newBadges: [], xpFromBadges: 0, coinsFromBadges: 0 };
     }
 
-    const earnedIds = new Set(earnedBadges.map((entry) => entry.badgeId._id.toString()));
+    // Same dangling-reference guard as getProfile() above — a badge earned before
+    // a reseed/deletion of the Badge catalog leaves a UserBadge row whose populated
+    // `badgeId` is null; that's stale data, not a reason to crash every login.
+    const earnedIds = new Set(
+      earnedBadges.filter((entry) => entry.badgeId).map((entry) => entry.badgeId._id.toString())
+    );
     const newBadges = [];
     let xpFromBadges = 0;
     let coinsFromBadges = 0;

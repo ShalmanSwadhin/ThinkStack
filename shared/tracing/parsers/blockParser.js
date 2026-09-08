@@ -12,11 +12,15 @@ import {
   findBraceBlockEnd,
   parseAssignment,
   parsePrint,
+  parseInput,
   parseSwap,
   buildAssignInstruction,
   buildArrayUpdateInstruction,
   buildPrintInstruction,
+  buildInputInstruction,
   buildCommentInstruction,
+  buildBlankInstruction,
+  buildDirectiveInstruction,
   buildStatementInstruction,
 } from './common.js';
 
@@ -28,14 +32,36 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
     const { raw, index } = lines[i];
     const line = stripComment(raw, language);
 
-    if (!line.trim() || isCommentOnly(raw, language)) {
+    // A blank line is not a comment — it carries no content of either kind, so it
+    // gets its own instruction kind (see ir/opcodes.js's BLANK_LINE) rather than
+    // being folded into COMMENT the way it previously was. Checked against the RAW
+    // line, not the comment-stripped `line` — `stripComment` removes a trailing
+    // `//...`/`#...` from an ENTIRE-comment line too, which would otherwise make
+    // every real comment look blank and get misclassified.
+    if (!raw.trim()) {
+      instructions.push(buildBlankInstruction(index, raw));
+      i += 1;
+      continue;
+    }
+    if (isCommentOnly(raw, language)) {
       instructions.push(buildCommentInstruction(index, raw));
       i += 1;
       continue;
     }
 
-    if (options.skipPatterns?.some((p) => p.test(line.trim()))) {
-      instructions.push(buildStatementInstruction(index, raw));
+    if (language === 'python' && /^(import\s+\w|from\s+\w+\s+import\b)/.test(line.trim())) {
+      instructions.push(buildDirectiveInstruction(index, raw, 'Module Directive', 'Import'));
+      i += 1;
+      continue;
+    }
+
+    // Preprocessor/module directives (`#include`, `import`, `package`, ...). Each
+    // language parser's `skipPatterns` is a list of `{pattern, directiveType,
+    // directiveSubtype}` descriptors — the PARSER decides the classification by
+    // which specific pattern matched, not a later guess from raw source text.
+    const directiveMatch = options.skipPatterns?.find((p) => p.pattern.test(line.trim()));
+    if (directiveMatch) {
+      instructions.push(buildDirectiveInstruction(index, raw, directiveMatch.directiveType, directiveMatch.directiveSubtype));
       i += 1;
       continue;
     }
@@ -115,6 +141,63 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
       }
     }
 
+    // do-while loop (C/C++/Java/JS only — Python has no do-while statement).
+    if (language !== 'python' && /^do\s*\{?\s*$/.test(line.trim())) {
+      const openBraceIdx = line.indexOf('{');
+      let bodyStartLine;
+      let doBodyCloseLine;
+      if (openBraceIdx >= 0) {
+        doBodyCloseLine = findBraceBlockEndFrom(lines, i, openBraceIdx + 1);
+        bodyStartLine = i + 1;
+      } else {
+        const nextTrimmed = i + 1 < lines.length ? stripComment(lines[i + 1].raw, language).trim() : '';
+        if (nextTrimmed.startsWith('{')) {
+          const braceCharIdx = lines[i + 1].raw.indexOf('{');
+          doBodyCloseLine = findBraceBlockEndFrom(lines, i + 1, braceCharIdx + 1);
+          bodyStartLine = i + 2;
+        }
+      }
+
+      if (doBodyCloseLine !== undefined) {
+        // The `while (...)` may share the closing `}`'s own line (`} while (cond);`)
+        // or — same Allman/GNU layout issue as else-if — start on its own SEPARATE
+        // following line.
+        const closeLineText = stripComment(lines[doBodyCloseLine].raw, language);
+        const closeBraceIdx = closeLineText.indexOf('}');
+        let whileLineIdx = doBodyCloseLine;
+        let whileSearchText = closeBraceIdx >= 0 ? closeLineText.slice(closeBraceIdx + 1) : closeLineText;
+        if (!whileSearchText.trim()) {
+          let probe = doBodyCloseLine + 1;
+          while (probe < lines.length && (!lines[probe].raw.trim() || isCommentOnly(lines[probe].raw, language))) probe += 1;
+          if (probe < lines.length) {
+            whileLineIdx = probe;
+            whileSearchText = stripComment(lines[probe].raw, language);
+          }
+        }
+
+        const whileHeaderMatch = whileSearchText.trim().match(/^while\s*\(/);
+        if (whileHeaderMatch) {
+          const openIdx = whileSearchText.indexOf('(', whileSearchText.indexOf('while'));
+          const closeIdx = findMatchingDelimiter(whileSearchText, openIdx, '(', ')');
+          const cond = closeIdx >= 0 ? whileSearchText.slice(openIdx + 1, closeIdx).trim() : '';
+
+          const headerIdx = instructions.length;
+          instructions.push(
+            createInstruction(IR_OPCODES.DO_WHILE, index + 1, raw, {
+              conditionExpr: parseExpressionString(cond),
+              conditionSource: cond,
+              bodyStartIndex: headerIdx + 1,
+              bodyEndIndex: headerIdx + 1,
+            })
+          );
+          parseStatementBlock(lines, bodyStartLine, doBodyCloseLine - 1, instructions, language, options);
+          instructions[headerIdx].bodyEndIndex = instructions.length - 1;
+          i = whileLineIdx + 1;
+          continue;
+        }
+      }
+    }
+
     // While loop
     const pyWhile = language === 'python' ? line.trim().match(/^while\s+(.+):$/) : null;
     const braceWhileParts = language !== 'python' ? matchParenHeader(line.trim(), 'while') : null;
@@ -139,6 +222,44 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
       continue;
     }
 
+    // switch statement (C/C++/Java/JS — Python has no switch statement in the
+    // versions this tracer targets). The body is parsed completely NORMALLY
+    // (nested if/for/while inside a case work exactly as anywhere else) — `case`/
+    // `default` labels are recognized as plain marker instructions wherever they
+    // occur (see parseSimpleStatement's CASE_LABEL handling above), and the
+    // SWITCH instruction itself just needs to know where each label ended up so
+    // it can jump straight to the matching one at runtime.
+    if (language !== 'python') {
+      const switchParts = matchParenHeader(line.trim(), 'switch');
+      if (switchParts) {
+        const bodyEndLine = findBraceBlockEnd(lines, i);
+        const headerIdx = instructions.length;
+        instructions.push(
+          createInstruction(IR_OPCODES.SWITCH, index + 1, raw, {
+            switchExprSource: switchParts.inner.trim(),
+            bodyStartIndex: headerIdx + 1,
+            bodyEndIndex: headerIdx + 1,
+          })
+        );
+        parseStatementBlock(lines, i + 1, bodyEndLine - 1, instructions, language, options);
+        instructions[headerIdx].bodyEndIndex = instructions.length - 1;
+        // Record where each case/default label landed in the flat instruction
+        // array, so the executor can jump straight there without re-scanning.
+        const cases = [];
+        let defaultIndex;
+        for (let idx = headerIdx + 1; idx <= instructions[headerIdx].bodyEndIndex; idx += 1) {
+          const candidate = instructions[idx];
+          if (candidate.op !== IR_OPCODES.CASE_LABEL) continue;
+          if (candidate.isDefault) defaultIndex = idx;
+          else cases.push({ valueExpr: candidate.caseValueExpr, index: idx });
+        }
+        instructions[headerIdx].cases = cases;
+        instructions[headerIdx].defaultIndex = defaultIndex;
+        i = bodyEndLine + 1;
+        continue;
+      }
+    }
+
     // if / elif / else chain (Python indentation-based, or brace-based with
     // `} else if (...) {` / `} else {` continuations). Parsed as one linked chain —
     // see parseIfChain's doc comment for why a single IF opcode per clause used to
@@ -150,10 +271,18 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
       continue;
     }
 
-    // Skip Python function/class definitions (body ignored for tracing)
+    // Skip Python function/class definitions (body ignored for tracing) — classified
+    // as a real FUNCTION_DEF/CLASS_DEF event rather than a generic statement, since
+    // the parser already knows exactly what construct this is.
     if (language === 'python' && /^(def|class)\s+\w+/.test(line.trim())) {
+      const kind = /^def\s+/.test(line.trim()) ? 'function' : 'class';
       const bodyEndLine = findPythonBlockEnd(lines, i, lines[i].indent);
-      instructions.push(buildStatementInstruction(index, raw));
+      instructions.push(
+        createInstruction(IR_OPCODES.FUNCTION_DEF, index + 1, raw, {
+          definitionKind: kind,
+          bodyTraced: false,
+        })
+      );
       i = bodyEndLine + 1;
       continue;
     }
@@ -171,16 +300,83 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
       const funcMatch = line.match(/^[A-Za-z_][\w:*&<>,\s]*?\s+(\w+)\s*\([^;{}]*\)\s*\{\s*$/);
       if (funcMatch && funcMatch[1] !== 'main') {
         const bodyEndLine = findBraceBlockEnd(lines, i);
-        instructions.push(buildStatementInstruction(index, raw));
+        instructions.push(
+          createInstruction(IR_OPCODES.FUNCTION_DEF, index + 1, raw, {
+            definitionKind: 'function',
+            functionName: funcMatch[1],
+            bodyTraced: false,
+          })
+        );
         i = bodyEndLine + 1;
         continue;
       }
     }
 
-    // Simple statements
+    // Simple statements — but first, if this line looks like the START of a
+    // statement wrapped across multiple physical lines for readability (e.g. a
+    // long `printf(...)`/function call with its closing paren on a LATER line),
+    // merge the continuation lines into one logical statement before parsing it.
+    // Without this, the first physical line is missing its closing `)` (so
+    // nothing recognizes it as a printf/call at all) and the following line(s)
+    // are independent-looking fragments that match nothing either — the whole
+    // statement (and any side effects/output it has) silently vanishes instead
+    // of running. Only engages when parens are genuinely unbalanced on this line;
+    // every ordinary single-line statement is completely unaffected.
+    if (countUnclosedParens(line) > 0) {
+      const merged = mergeContinuationLines(lines, i, language);
+      parseSimpleStatement(
+        [{ raw: merged.raw, index: lines[i].index, indent: lines[i].indent }],
+        0,
+        instructions,
+        language
+      );
+      i = merged.endIndex + 1;
+      continue;
+    }
+
     parseSimpleStatement(lines, i, instructions, language);
     i += 1;
   }
+}
+
+/** Counts net unclosed `(` depth in a single stripped line (quote-aware, so a
+ * literal paren character inside a string doesn't skew the count). */
+function countUnclosedParens(text) {
+  let depth = 0;
+  let quote = null;
+  for (let idx = 0; idx < text.length; idx += 1) {
+    const ch = text[idx];
+    if (quote) {
+      if (ch === quote && text[idx - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+  }
+  return depth;
+}
+
+/** Joins physical lines starting at `startIdx` until parens balance (or a small
+ * safety bound is hit), attributing the merged text to the FIRST line — matching
+ * how a reader would mentally treat a wrapped statement as one logical line. The
+ * merged/reconstructed text is what appears as this instruction's `sourceLine` in
+ * the trace table; it may not be byte-identical to the original multi-line
+ * formatting, but accurately represents the statement that actually ran. */
+function mergeContinuationLines(lines, startIdx, language) {
+  let raw = stripComment(lines[startIdx].raw, language).trim();
+  let endIndex = startIdx;
+  let guard = 0;
+  while (countUnclosedParens(raw) > 0 && endIndex + 1 < lines.length && guard < 20) {
+    endIndex += 1;
+    const next = stripComment(lines[endIndex].raw, language).trim();
+    if (next) raw += ' ' + next;
+    guard += 1;
+  }
+  return { raw, endIndex };
 }
 
 /**
@@ -222,6 +418,31 @@ function parseIfChain(lines, startIndex, instructions, language, blockStyle, opt
   let clauseNumber = 0;
 
   for (;;) {
+    // Allman/GNU brace style: a clause's body closes with a BARE `}` on its own
+    // line, and the next clause's `else`/`else if` starts a SEPARATE following
+    // line — not `} else if (...) {` sharing one line. Before this fix, a bare
+    // `}` with nothing after it was treated as "no continuation" (chain ends
+    // here), so the `else if (...)` line on the NEXT line was never recognized
+    // as part of the chain at all — it fell through as an unrecognized top-level
+    // statement (a silent no-op), and everything physically after it in the
+    // source ran completely UNCONDITIONALLY, as ordinary top-level code. Confirmed
+    // live: an if/else-if/else written in this (extremely common) style executed
+    // its else-if body regardless of the condition. Skip forward past blank/
+    // comment lines here so the rest of this loop iteration sees the REAL next
+    // clause header, exactly as if it had shared the line with the `}`.
+    if (blockStyle === 'brace' && clauseNumber > 0) {
+      const bareBraceOnly = stripComment(lines[i].raw, language).trim() === '}';
+      if (bareBraceOnly) {
+        let probe = i + 1;
+        while (probe < lines.length && (!lines[probe].raw.trim() || isCommentOnly(lines[probe].raw, language))) {
+          probe += 1;
+        }
+        if (probe < lines.length && /^else\b/.test(stripComment(lines[probe].raw, language).trim())) {
+          i = probe;
+        }
+      }
+    }
+
     const { raw, index } = lines[i];
     const line = stripComment(raw, language);
     const trimmed = line.trim();
@@ -321,6 +542,10 @@ function parseIfChain(lines, startIndex, instructions, language, blockStyle, opt
         conditionExpr: cond ? parseExpressionString(cond) : undefined,
         conditionSource: cond,
         isElse,
+        // Set by the PARSER from its own clause position, not guessed later from
+        // source text — drives the eventType/eventSubtype classification (Condition
+        // vs. Branch, If vs. ElseIf vs. Else) in explain/classify.js.
+        clauseKind: clauseNumber === 0 ? 'if' : isElse ? 'else' : 'else-if',
         thenStartIndex: headerIdx + 1,
       })
     );
@@ -450,6 +675,7 @@ function tryParseSingleLineIfChain(lines, startIndex, instructions, language) {
         conditionExpr: cond ? parseExpressionString(cond) : undefined,
         conditionSource: cond,
         isElse,
+        clauseKind: clauseNumber === 0 ? 'if' : isElse ? 'else' : 'else-if',
         thenStartIndex: headerIdx + 1,
       })
     );
@@ -562,6 +788,10 @@ function parseSimpleStatement(lines, i, instructions, language) {
   const line = stripComment(raw, language);
 
   const assign = parseAssignment(line);
+  if (assign?.declareOnly) {
+    instructions.push(buildAssignInstruction(index, raw, assign, true));
+    return;
+  }
   if (assign?.multiDeclare) {
     // `int sum=24, i=23;` -> one DECLARE_VARIABLE instruction per variable, all
     // attributed to this source line (multiple steps per line is already how loop
@@ -600,6 +830,12 @@ function parseSimpleStatement(lines, i, instructions, language) {
     return;
   }
 
+  const input = parseInput(line);
+  if (input) {
+    instructions.push(buildInputInstruction(index, raw, input));
+    return;
+  }
+
   const swap = parseSwap(line);
   if (swap) {
     instructions.push(
@@ -625,6 +861,21 @@ function parseSimpleStatement(lines, i, instructions, language) {
     return;
   }
 
+  // `case <value>:` / `default:` — a pure LABEL inside a switch body (see the
+  // `switch` handling in parseStatementBlock), not a block construct of its own:
+  // it doesn't recurse into a body range, it just marks a jump target that
+  // ordinary statements (including nested if/for/while, parsed completely
+  // normally) follow linearly until a `break` or the switch's own end.
+  const caseMatch = line.trim().match(/^case\s+(.+?)\s*:$/);
+  if (caseMatch) {
+    instructions.push(createInstruction(IR_OPCODES.CASE_LABEL, index + 1, raw, { caseValueExpr: parseExpressionString(caseMatch[1]) }));
+    return;
+  }
+  if (line.trim() === 'default:') {
+    instructions.push(createInstruction(IR_OPCODES.CASE_LABEL, index + 1, raw, { isDefault: true }));
+    return;
+  }
+
   // Bare expression statement with its own side effect: standalone `i++;`, `++i;`,
   // or a bare function call `foo();`. None of the checks above recognize these
   // (they all require an `=` or a specific keyword), so without this they silently
@@ -635,12 +886,15 @@ function parseSimpleStatement(lines, i, instructions, language) {
   const trimmedForExpr = line.trim().replace(/;$/, '');
   if (trimmedForExpr) {
     const exprNode = parseExpressionString(trimmedForExpr);
-    if (
-      exprNode.type === EXPR_TYPES.PRE_INCDEC ||
-      exprNode.type === EXPR_TYPES.POST_INCDEC ||
-      exprNode.type === EXPR_TYPES.CALL
-    ) {
+    if (exprNode.type === EXPR_TYPES.PRE_INCDEC || exprNode.type === EXPR_TYPES.POST_INCDEC) {
       instructions.push(createInstruction(IR_OPCODES.INCREMENT, index + 1, raw, { valueExpr: exprNode }));
+      return;
+    }
+    if (exprNode.type === EXPR_TYPES.CALL) {
+      // A bare function-call statement (`foo();`) — its own real classification
+      // (FUNCTION_CALL), not the increment/decrement bucket. Arguments are still
+      // evaluated for side effects by the same evaluator path as INCREMENT used.
+      instructions.push(createInstruction(IR_OPCODES.FUNCTION_CALL, index + 1, raw, { valueExpr: exprNode }));
       return;
     }
   }

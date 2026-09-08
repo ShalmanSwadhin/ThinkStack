@@ -19,6 +19,21 @@ function ConditionBadge({ result }) {
   );
 }
 
+// Only flagged for statuses a reader should specifically notice — "Executed" is the
+// default/expected outcome for most rows and doesn't need its own badge.
+function ExecutionStatusBadge({ status }) {
+  const styles = {
+    Skipped: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+    NotSimulated: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
+  };
+  if (!styles[status]) return null;
+  return (
+    <span className={cn('ml-2 inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', styles[status])}>
+      {status === 'NotSimulated' ? 'Not Simulated' : status}
+    </span>
+  );
+}
+
 function TraceTableContent({ model, currentStepIndex, forExport = false }) {
   const { rows, variableNames, source, language, stepCount } = model;
 
@@ -112,7 +127,10 @@ function TraceTableContent({ model, currentStepIndex, forExport = false }) {
                     <td className="border px-2 py-1.5 font-medium">{row.step}</td>
                     <td className="border px-2 py-1.5">{row.line}</td>
                     <td className="border px-2 py-1.5 font-mono text-[11px]">{row.statement}</td>
-                    <td className="border px-2 py-1.5">{row.event}</td>
+                    <td className="border px-2 py-1.5">
+                      <span>{row.event}</span>
+                      <ExecutionStatusBadge status={row.executionStatus} />
+                    </td>
                     <td className="border px-2 py-1.5">
                       <span>{row.condition}</span>
                       <ConditionBadge result={row.conditionResult} />

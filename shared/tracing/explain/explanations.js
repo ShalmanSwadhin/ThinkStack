@@ -64,6 +64,14 @@ export function explainInstruction(inst, scope, output, extra = {}) {
     case IR_OPCODES.COMMENT:
       return 'This comment is ignored during execution. It documents the code for readers.';
 
+    case IR_OPCODES.BLANK_LINE:
+      return 'This is a blank line. It has no effect on execution.';
+
+    case IR_OPCODES.DIRECTIVE: {
+      const kind = (inst.directiveType ?? 'directive').toLowerCase();
+      return `This is a ${kind} (${inst.directiveSubtype ?? 'directive'}), handled before normal program execution — it does not itself run as a statement.`;
+    }
+
     case IR_OPCODES.DECLARE_VARIABLE:
     case IR_OPCODES.ASSIGN: {
       // The executor tracks, at runtime, which names have already been bound at
@@ -76,6 +84,9 @@ export function explainInstruction(inst, scope, output, extra = {}) {
       const sideEffectText = describeSideEffects(extra.sideEffects, 'used in this calculation');
 
       if (isDeclaration) {
+        if (inst.hasInitializer === false) {
+          return `A new variable "${inst.target}" is declared with no initial value — its value is not yet known until something assigns to it.`;
+        }
         // `int sum=24, i=23;` declares two variables on one line — each becomes its
         // own step (so the tracer can highlight/step through each initializer), but
         // must say which declarator it is, not look like two unrelated statements.
@@ -83,7 +94,7 @@ export function explainInstruction(inst, scope, output, extra = {}) {
           extra.declaratorCount > 1
             ? ` (declarator ${extra.declaratorIndex + 1} of ${extra.declaratorCount} declared on this line)`
             : '';
-        return `A new variable "${inst.target}" is created with value ${currentValue}${groupLabel}.${sideEffectText}`;
+        return `A new variable "${inst.target}" is declared and initialized to ${currentValue}${groupLabel}.${sideEffectText}`;
       }
 
       const prev = extra.previousValue;
@@ -107,14 +118,51 @@ export function explainInstruction(inst, scope, output, extra = {}) {
       return base + describeSideEffects(extra.sideEffects, 'printed');
     }
 
-    case IR_OPCODES.FOR_EACH:
     case IR_OPCODES.FOR_LOOP:
+      if (extra.phase === 'init') {
+        return `The loop's initializer runs once, before the first condition check: ${inst.initSource ?? ''}.`;
+      }
+      if (extra.phase === 'update') {
+        return `The loop's increment/update clause runs at the end of this iteration, before the condition is checked again: ${inst.incrementSource ?? ''}.`;
+      }
+      return extra.condition || 'The loop condition is checked.';
+
+    case IR_OPCODES.FOR_EACH:
     case IR_OPCODES.WHILE_LOOP:
-      return extra.condition || 'The loop prepares the next iteration.';
+      return extra.condition || 'The loop condition is checked.';
+
+    case IR_OPCODES.DO_WHILE:
+      return extra.condition || 'The loop condition is checked.';
+
+    case IR_OPCODES.IF: {
+      // Driven entirely by what the executor actually decided for THIS clause
+      // (`extra.branchTaken`/`extra.skippedDueToEarlierMatch`), not a guess from
+      // source text — works identically for if/else-if/else in every language.
+      if (extra.skippedDueToEarlierMatch) {
+        return inst.isElse
+          ? 'An earlier condition in this if/else-if chain already matched, so the "else" branch is SKIPPED.'
+          : `An earlier condition in this chain already matched, so the condition "${inst.conditionSource}" is never even checked — this branch is SKIPPED.`;
+      }
+      if (inst.isElse) {
+        return 'No earlier condition in this chain matched, so the "else" branch runs unconditionally: EXECUTED.';
+      }
+      const hasMoreClauses = inst.nextClauseIndex !== undefined;
+      if (extra.branchTaken) {
+        return `Condition "${inst.conditionSource}" evaluates to true — this branch is EXECUTED.${hasMoreClauses ? ' Every later else-if/else clause in this chain is SKIPPED.' : ''}`;
+      }
+      return `Condition "${inst.conditionSource}" evaluates to false — this branch is SKIPPED.${hasMoreClauses ? ' The next condition in the chain is checked next.' : ' No branch in this chain runs.'}`;
+    }
+
+    case IR_OPCODES.SWITCH:
+      return extra.condition || 'The switch expression is evaluated and control jumps to the matching case.';
+
+    case IR_OPCODES.CASE_LABEL:
+      return inst.isDefault
+        ? 'The default case. Reached because no earlier case matched (or execution fell through from the case above).'
+        : `A case label. Reached either because the switch expression matched it, or execution fell through from the case above.`;
 
     case IR_OPCODES.COMPARE:
-    case IR_OPCODES.IF:
-      return extra.condition || 'A condition is evaluated to choose the next branch.';
+      return extra.condition || 'A condition is evaluated during search.';
 
     case IR_OPCODES.SEARCH_COMPARE:
       return extra.condition || `Comparing ${extra.left ?? '?'} with ${extra.right ?? '?'} during search.`;
@@ -122,9 +170,24 @@ export function explainInstruction(inst, scope, output, extra = {}) {
     case IR_OPCODES.SORT_SWAP:
       return `Swapping elements at positions ${inst.leftIndex ?? '?'} and ${inst.rightIndex ?? '?'} to sort the array.`;
 
-    case IR_OPCODES.FUNCTION_CALL:
+    case IR_OPCODES.FUNCTION_CALL: {
+      const callText = inst.valueExpr ? exprToString(inst.valueExpr) : inst.functionName ?? 'a function';
+      const sideEffectText = describeSideEffects(extra.sideEffects, 'used as an argument');
+      return `\`${callText}\` is called. This tracer does not step into function bodies, so only the effect of evaluating its arguments (if any) is shown here.${sideEffectText}`;
+    }
+
     case IR_OPCODES.RECURSIVE_CALL:
       return `Function "${inst.functionName ?? 'unknown'}" is called.`;
+
+    case IR_OPCODES.FUNCTION_DEF:
+      return inst.definitionKind === 'class'
+        ? 'This defines a class. Its body is not traced — only `main`\'s own statements are executed by this tracer.'
+        : `This defines the function "${inst.functionName ?? inst.sourceLine?.trim()}". Its body is not traced (this engine does not model a call stack/return values) — only its definition is acknowledged here.`;
+
+    case IR_OPCODES.INPUT: {
+      const targetsText = inst.targets ? inst.targets.join(', ') : '';
+      return `This line reads user input at runtime (${inst.kind ?? 'input'}). ThinkStack's tracer cannot simulate real keyboard input, so ${targetsText || 'the target variable'}'s value does not change here — reported honestly rather than guessed.`;
+    }
 
     case IR_OPCODES.FUNCTION_RETURN:
       return `Function "${inst.functionName ?? 'unknown'}" returns ${formatValue(extra.returnValue)}.`;
@@ -187,24 +250,37 @@ export function opcodeToStepType(op) {
   switch (op) {
     case IR_OPCODES.COMMENT:
       return 'comment';
+    case IR_OPCODES.BLANK_LINE:
+      return 'blank';
+    case IR_OPCODES.DIRECTIVE:
+      return 'directive';
     case IR_OPCODES.DECLARE_VARIABLE:
+      return 'declaration';
     case IR_OPCODES.ASSIGN:
     case IR_OPCODES.ARRAY_UPDATE:
     case IR_OPCODES.INCREMENT:
+    case IR_OPCODES.SORT_SWAP:
       return 'assign';
     case IR_OPCODES.PRINT:
       return 'output';
+    case IR_OPCODES.INPUT:
+      return 'input';
     case IR_OPCODES.FOR_EACH:
     case IR_OPCODES.FOR_LOOP:
     case IR_OPCODES.WHILE_LOOP:
+    case IR_OPCODES.DO_WHILE:
     case IR_OPCODES.LOOP_INCREMENT:
       return 'loop';
     case IR_OPCODES.COMPARE:
     case IR_OPCODES.IF:
     case IR_OPCODES.SEARCH_COMPARE:
       return 'condition';
-    case IR_OPCODES.SORT_SWAP:
-      return 'assign';
+    case IR_OPCODES.SWITCH:
+    case IR_OPCODES.CASE_LABEL:
+      return 'condition';
+    case IR_OPCODES.FUNCTION_DEF:
+    case IR_OPCODES.FUNCTION_CALL:
+      return 'function';
     default:
       return 'statement';
   }

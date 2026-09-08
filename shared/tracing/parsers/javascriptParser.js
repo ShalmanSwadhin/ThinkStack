@@ -6,7 +6,11 @@ import { createProgram } from '../ir/program.js';
 import { parseLines } from './common.js';
 import { parseStatementBlock } from './blockParser.js';
 
-const SKIP = [/^(import|export|class)\b/];
+const SKIP = [
+  { pattern: /^import\b/, directiveType: 'Module Directive', directiveSubtype: 'Import' },
+  { pattern: /^export\b/, directiveType: 'Module Directive', directiveSubtype: 'Export' },
+  { pattern: /^class\b/, directiveType: 'Class Declaration', directiveSubtype: 'Class' },
+];
 
 export function parseJavaScript(source) {
   const lines = parseLines(source);

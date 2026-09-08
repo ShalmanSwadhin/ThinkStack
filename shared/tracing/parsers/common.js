@@ -94,6 +94,21 @@ export function parseAssignment(line) {
   const trimmed = line.trim().replace(/;$/, '');
   if (trimmed.includes('==') || trimmed.includes('!=') || /^for\s*\(/.test(trimmed)) return null;
 
+  // Declaration with NO initializer at all: `int x;`. This is genuinely different
+  // from `int x = 0;` — the variable exists but its value is not yet known — so it
+  // must be classified as "Declaration" rather than "Declaration + Initialization"
+  // (see explain/classify.js). Checked before the assignment regexes below since
+  // this shape has no `=` at all.
+  const declareOnlyMatch = trimmed.match(new RegExp(`^(${TYPE_KEYWORDS})\\s+([a-zA-Z_]\\w*(?:\\[[^\\]]*\\])?)$`));
+  if (declareOnlyMatch) {
+    const [, typeKeyword, target] = declareOnlyMatch;
+    return {
+      declareOnly: true,
+      target: target.replace(/\[[^\]]*\]$/, ''),
+      declaredType: normalizeDeclaredType(typeKeyword, undefined),
+    };
+  }
+
   // Compound assignment to an array element: a[i] *= 2  ->  reconstruct as a[i] = a[i] * 2
   const compoundArrayMatch = matchCompoundOp(trimmed, /^(\w+)\s*\[\s*(.+?)\s*\]$/);
   if (compoundArrayMatch) {
@@ -256,6 +271,36 @@ export function parsePrint(line) {
   return null;
 }
 
+/**
+ * Recognizes user-input constructs (`scanf`, `cin >>`, Python `input()`, JS
+ * `prompt()`). This tracer has no real keyboard to read from, so these are
+ * classified correctly (eventType "Input") and traced honestly — see
+ * engine/executor.js's INPUT case — rather than either crashing or fabricating a
+ * plausible-looking value that was never actually typed.
+ */
+export function parseInput(line) {
+  const trimmed = line.trim().replace(/;$/, '');
+
+  const scanfMatch = trimmed.match(/^scanf\s*\(/);
+  if (scanfMatch) {
+    const inner = trimmed.slice(trimmed.indexOf('(') + 1, trimmed.lastIndexOf(')'));
+    const parts = splitTopLevelCommas(inner);
+    return { kind: 'scanf', format: parts[0] ?? '""', targets: parts.slice(1).map((p) => p.trim()) };
+  }
+
+  const cinMatch = trimmed.match(/^cin\s*>>\s*(.+)$/);
+  if (cinMatch) {
+    return { kind: 'cin', targets: cinMatch[1].split('>>').map((s) => s.trim()) };
+  }
+
+  const inputCallMatch = trimmed.match(/^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s*=\s*(?:input|prompt)\s*\(([^)]*)\)$/);
+  if (inputCallMatch) {
+    return { kind: 'input', targets: [inputCallMatch[1].trim()], promptSource: inputCallMatch[2] };
+  }
+
+  return null;
+}
+
 export function parseSwap(line) {
   const trimmed = line.trim().replace(/;$/, '');
   const match = trimmed.match(
@@ -277,11 +322,24 @@ export function parseSwap(line) {
 
 export function buildAssignInstruction(lineIndex, raw, assign, isDeclare = false) {
   const op = isDeclare ? IR_OPCODES.DECLARE_VARIABLE : IR_OPCODES.ASSIGN;
+  if (assign.declareOnly) {
+    // `int x;` — a declaration with no initializer. No value expression to build at
+    // all (there is nothing on the right of an `=` — there is no `=`), so the
+    // variable's value stays `undefined` until a later real assignment gives it
+    // one — an honest "not yet initialized" rather than a guessed default.
+    return createInstruction(op, lineIndex + 1, raw, {
+      target: assign.target,
+      declaredType: assign.declaredType,
+      hasInitializer: false,
+    });
+  }
   return createInstruction(op, lineIndex + 1, raw, {
     target: assign.target,
     valueExpr: parseExpressionString(assign.fullExpr ?? `${assign.target} = ${assign.expr}`),
     valueSource: assign.expr,
     declaredType: assign.declaredType,
+    compoundOp: assign.compoundOp,
+    hasInitializer: true,
   });
 }
 
@@ -304,8 +362,25 @@ export function buildPrintInstruction(lineIndex, raw, print) {
   });
 }
 
+export function buildInputInstruction(lineIndex, raw, input) {
+  return createInstruction(IR_OPCODES.INPUT, lineIndex + 1, raw, { ...input });
+}
+
 export function buildCommentInstruction(lineIndex, raw) {
   return createInstruction(IR_OPCODES.COMMENT, lineIndex + 1, raw);
+}
+
+/** A line with no source content — NOT a comment (see explain/classify.js). */
+export function buildBlankInstruction(lineIndex, raw) {
+  return createInstruction(IR_OPCODES.BLANK_LINE, lineIndex + 1, raw);
+}
+
+/** A preprocessor/module directive (`#include`, `import`, ...). `directiveType`/
+ * `directiveSubtype` are set by the PARSER based on which specific pattern in its
+ * skip-pattern table matched — see parsers/blockParser.js and each language
+ * parser's `SKIP` list — not guessed later from source text. */
+export function buildDirectiveInstruction(lineIndex, raw, directiveType, directiveSubtype) {
+  return createInstruction(IR_OPCODES.DIRECTIVE, lineIndex + 1, raw, { directiveType, directiveSubtype });
 }
 
 export function buildStatementInstruction(lineIndex, raw) {
@@ -321,5 +396,6 @@ export default {
   findBraceBlockEnd,
   parseAssignment,
   parsePrint,
+  parseInput,
   parseSwap,
 };

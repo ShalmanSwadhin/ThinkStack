@@ -30,47 +30,42 @@ export function executeIR(program) {
   }
 
   let ip = 0;
-  const loopStack = [];
-  // Tracks open if/elif/else chains: when execution reaches the end of a TAKEN
-  // clause's own body, it must skip past every remaining clause in the chain
-  // (`chainEndIndex`) rather than falling through into the next clause's condition
-  // check/body — see parsers/blockParser.js's `parseIfChain` for why that fallthrough
-  // used to silently run every branch past the first.
-  const ifStack = [];
+  // A SINGLE unified stack of open blocks (if-chains AND loops), pushed in true
+  // nesting order regardless of which kind of block is innermost. This replaces an
+  // earlier design with two SEPARATE stacks (one for if-chains, one for loops),
+  // which had a real bug: when a loop is the last/only thing inside a taken if
+  // branch, the if-chain's `bodyEndIndex` and the loop's own `bodyEndIndex`
+  // coincide (they both end at the same final instruction). Checking the if-stack
+  // before the loop-stack then popped the if-chain frame on the LOOP's very FIRST
+  // iteration boundary (mistaking "the loop paused to check whether to continue"
+  // for "the if-branch's body is over") — consuming the frame so that when the
+  // loop genuinely finished many iterations later, there was no if-frame left to
+  // redirect past the else clause, and the else ran for real. A single stack,
+  // always resolving whichever block is TRULY innermost (the top of ONE stack),
+  // makes that ordering bug structurally impossible: a loop frame sitting above an
+  // if-frame always gets first refusal at the same boundary, and only pops through
+  // to the if-frame once the loop has authentically finished.
+  const blockStack = [];
 
-  // BREAK/CONTINUE/RETURN can jump execution past an open if/elif/else chain
-  // without ever naturally reaching the end of its taken clause (e.g. `break`
-  // inside an `if` inside a `for`) — any ifStack frame whose scope is now entirely
-  // behind the new `ip` must be discarded outright, NOT redirected through its
-  // `chainEndIndex` (which would otherwise incorrectly jump execution backward,
-  // since `advancePastClosedBlocks` only checks "did ip pass this frame's end",
-  // not "did we get there via normal fallthrough vs. an explicit jump").
-  const discardStaleIfFrames = (targetIp) => {
-    while (ifStack.length && ifStack.at(-1).bodyEndIndex < targetIp) {
-      ifStack.pop();
+  // `break` targets the nearest enclosing LOOP *or* `switch`, whichever is
+  // innermost. `continue` only ever targets a loop — it skips right over an
+  // enclosing `switch` frame (continuing a switch makes no sense; C requires
+  // `continue` inside a switch to affect whatever loop contains it).
+  const innermostBreakableIndex = () => {
+    for (let idx = blockStack.length - 1; idx >= 0; idx -= 1) {
+      if (blockStack[idx].type !== 'if') return idx;
     }
+    return -1;
+  };
+  const innermostLoopIndex = () => {
+    for (let idx = blockStack.length - 1; idx >= 0; idx -= 1) {
+      const t = blockStack[idx].type;
+      if (t !== 'if' && t !== 'switch') return idx;
+    }
+    return -1;
   };
 
-  const advancePastClosedBlocks = () => {
-    for (;;) {
-      if (ifStack.length && ip > ifStack.at(-1).bodyEndIndex) {
-        ip = ifStack.pop().chainEndIndex;
-        continue;
-      }
-      if (loopStack.length && ip > loopStack.at(-1).bodyEndIndex) {
-        continueLoops();
-        continue;
-      }
-      break;
-    }
-  };
-
-  const continueLoops = () => {
-    if (!loopStack.length) return false;
-
-    const frame = loopStack.at(-1);
-    if (ip <= frame.bodyEndIndex) return false;
-
+  const continueLoopFrame = (frame) => {
     if (frame.type === 'for-each') {
       frame.index += 1;
       if (frame.index < frame.iterable.length) {
@@ -80,33 +75,102 @@ export function executeIR(program) {
         });
         ip = frame.bodyStartIndex;
       } else {
-        loopStack.pop();
+        blockStack.pop();
       }
-      return true;
-    }
-
-    if (frame.type === 'while') {
-      const pass = evaluateCondition(frame.condition, runtime.scope);
-      pushStep(instructions[frame.headerIndex], {
-        condition: `${frame.conditionSource ?? frame.condition} → ${pass}`,
-      });
-      if (pass) ip = frame.bodyStartIndex;
-      else loopStack.pop();
-      return true;
+      return;
     }
 
     if (frame.type === 'c-for') {
+      // The increment clause (`i++`) and the condition re-check are two DISTINCT
+      // events in real execution order — a C-style for-loop's per-iteration cycle
+      // is update, THEN condition, not one combined "update-and-check" step.
       applyIncrement(frame.increment, runtime.scope);
+      pushStep(instructions[frame.headerIndex], {
+        phase: 'update',
+        condition: `update: ${frame.increment}`,
+      });
       const pass = evaluateCondition(frame.condition, runtime.scope);
       pushStep(instructions[frame.headerIndex], {
         condition: `${frame.conditionSource ?? frame.condition} → ${pass}`,
+        loopContinues: pass,
       });
       if (pass) ip = frame.bodyStartIndex;
-      else loopStack.pop();
-      return true;
+      else blockStack.pop();
+      return;
     }
 
-    return false;
+    if (frame.type === 'while' || frame.type === 'do-while') {
+      // Identical per-iteration re-check for both — the only difference between
+      // `while` and `do-while` is how the loop is FIRST entered (while checks
+      // before the first pass; do-while enters unconditionally, see the
+      // WHILE_LOOP/DO_WHILE opcode cases below), not how it continues afterward.
+      const pass = evaluateCondition(frame.condition, runtime.scope);
+      pushStep(instructions[frame.headerIndex], {
+        condition: `${frame.conditionSource ?? frame.condition} → ${pass}`,
+        loopContinues: pass,
+      });
+      if (pass) ip = frame.bodyStartIndex;
+      else blockStack.pop();
+      return;
+    }
+  };
+
+  // Announces the clause(s) that will NOT run (the rest of an if/elif/else chain
+  // once an earlier clause matched) as their own trace steps — but only once the
+  // TAKEN clause's body has actually finished, so the trace reads in real
+  // execution order (condition → body statements → "else: skipped"), not in
+  // source order (condition → "else: skipped" → body statements, which is what a
+  // naive "announce the skip the moment we know" implementation produces).
+  const emitSkippedSiblings = (frame) => {
+    for (const siblingIdx of frame.skipSiblingIndices ?? []) {
+      const sibling = instructions[siblingIdx];
+      pushStep(sibling, {
+        condition: sibling.isElse
+          ? 'else (skipped — an earlier branch in this chain already matched)'
+          : `${sibling.conditionSource ?? 'condition'} (skipped — an earlier branch in this chain already matched)`,
+        branchTaken: false,
+        skippedDueToEarlierMatch: true,
+      });
+    }
+  };
+
+  // Used by BREAK/CONTINUE/RETURN, which can jump execution past open if-chains
+  // without ever naturally reaching the end of their taken clause. Frames above
+  // `keepLength` are abandoned along with the rest of the construct they were
+  // inside — any if-chain frames among them still get their skip notices emitted
+  // (the else genuinely was never going to run, whether or not a break happened
+  // afterward), but are discarded rather than redirected through `chainEndIndex`.
+  const discardFramesFrom = (keepLength) => {
+    while (blockStack.length > keepLength) {
+      const frame = blockStack.pop();
+      if (frame.type === 'if') emitSkippedSiblings(frame);
+    }
+  };
+
+  const advancePastClosedBlocks = () => {
+    for (;;) {
+      const top = blockStack.at(-1);
+      if (!top || ip <= top.bodyEndIndex) break;
+      if (top.type === 'if') {
+        blockStack.pop();
+        emitSkippedSiblings(top);
+        ip = top.chainEndIndex;
+        continue;
+      }
+      if (top.type === 'switch') {
+        // Falling off the end of a switch body with no `break` is not an error —
+        // it's just where execution goes next; no redirect needed, unlike an
+        // if-chain's "skip the remaining clauses" jump.
+        blockStack.pop();
+        continue;
+      }
+      continueLoopFrame(top);
+      // Whether the loop just reset `ip` back into its body or genuinely finished
+      // and popped itself, re-checking from the top handles both: a reset `ip` is
+      // now <= this frame's own bodyEndIndex (loop cleanly re-enters), and a pop
+      // exposes whatever frame is next (which may ALSO need resolving at this
+      // same `ip`, e.g. an enclosing if-chain whose taken branch was this loop).
+    }
   };
 
   while (ip < instructions.length) {
@@ -239,6 +303,43 @@ export function executeIR(program) {
         break;
       }
 
+      case IR_OPCODES.INPUT: {
+        // `scanf`, `cin >>`, Python `input()`, JS `prompt()` — this is a STATIC
+        // tracer with no real keyboard to read from. Per the "report unsupported
+        // constructs honestly instead of faking traces" principle, the target
+        // variable(s) are left exactly as they were — NOT overwritten with a
+        // fabricated value that was never actually typed — and the step is
+        // classified as Input so the trace is still accurate about what KIND of
+        // line this is, even though its runtime effect can't be simulated.
+        pushStep(inst, { inputNotSimulated: true });
+        ip += 1;
+        advancePastClosedBlocks();
+        break;
+      }
+
+      case IR_OPCODES.FUNCTION_CALL: {
+        // A bare function-call statement (`foo();`). Arguments are still evaluated
+        // for their own side effects (e.g. `foo(x++)`); the call's return value
+        // (if any) is not tracked since this engine does not implement real
+        // function-body tracing — see the FUNCTION_DEF case's limitation note.
+        if (inst.valueExpr) evaluateExpr(inst.valueExpr, runtime.scope);
+        const sideEffects = drainSideEffects(runtime.scope);
+        pushStep(inst, { sideEffects });
+        ip += 1;
+        advancePastClosedBlocks();
+        break;
+      }
+
+      case IR_OPCODES.FUNCTION_DEF: {
+        // A function/class definition this engine deliberately does not trace into
+        // (no call-stack/return-value model) — its body was already skipped by the
+        // parser (see parsers/blockParser.js). Recorded honestly as its own event
+        // rather than a generic statement, and rather than pretending it executed.
+        pushStep(inst, { bodyTraced: false });
+        ip += 1;
+        break;
+      }
+
       case IR_OPCODES.FOR_EACH: {
         const iterable = inst.iterableExpr
           ? evaluateExpr(inst.iterableExpr, runtime.scope)
@@ -249,7 +350,7 @@ export function executeIR(program) {
           ip = inst.bodyEndIndex + 1;
           break;
         }
-        loopStack.push({
+        blockStack.push({
           type: 'for-each',
           variable: inst.variable,
           iterable: arr,
@@ -267,14 +368,21 @@ export function executeIR(program) {
       }
 
       case IR_OPCODES.FOR_LOOP: {
-        if (inst.initSource) applyIncrement(inst.initSource, runtime.scope);
+        // Initialization is its own event, distinct from the condition check that
+        // follows it — `for (int i = 0; i < 3; i++)` runs init ONCE, then
+        // condition/body/update repeatedly; collapsing init into the first
+        // condition check would hide it from the trace entirely.
+        if (inst.initSource) {
+          applyIncrement(inst.initSource, runtime.scope);
+          pushStep(inst, { phase: 'init', condition: `initialize: ${inst.initSource}` });
+        }
         const pass = evaluateCondition(inst.conditionSource ?? inst.conditionExpr, runtime.scope);
         if (!pass) {
-          pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → false (loop finished)` });
+          pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → false (loop finished)`, loopContinues: false });
           ip = inst.bodyEndIndex + 1;
           break;
         }
-        loopStack.push({
+        blockStack.push({
           type: 'c-for',
           condition: inst.conditionSource ?? inst.conditionExpr,
           conditionSource: inst.conditionSource,
@@ -283,19 +391,19 @@ export function executeIR(program) {
           bodyStartIndex: inst.bodyStartIndex,
           bodyEndIndex: inst.bodyEndIndex,
         });
-        pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → true` });
+        pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → true`, loopContinues: true });
         ip = inst.bodyStartIndex;
         break;
       }
 
       case IR_OPCODES.WHILE_LOOP: {
         const pass = evaluateCondition(inst.conditionSource ?? inst.conditionExpr, runtime.scope);
-        pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → ${pass}` });
+        pushStep(inst, { condition: `${inst.conditionSource ?? 'condition'} → ${pass}`, loopContinues: pass });
         if (!pass) {
           ip = inst.bodyEndIndex + 1;
           break;
         }
-        loopStack.push({
+        blockStack.push({
           type: 'while',
           condition: inst.conditionSource ?? inst.conditionExpr,
           conditionSource: inst.conditionSource,
@@ -306,6 +414,58 @@ export function executeIR(program) {
         ip = inst.bodyStartIndex;
         break;
       }
+
+      case IR_OPCODES.DO_WHILE: {
+        // Unlike WHILE_LOOP, the body runs unconditionally the FIRST time — the
+        // condition is only checked after it, in `continueLoopFrame`'s shared
+        // while/do-while branch above.
+        blockStack.push({
+          type: 'do-while',
+          condition: inst.conditionSource ?? inst.conditionExpr,
+          conditionSource: inst.conditionSource,
+          headerIndex: ip,
+          bodyStartIndex: inst.bodyStartIndex,
+          bodyEndIndex: inst.bodyEndIndex,
+        });
+        pushStep(inst, { condition: 'entering the loop body (condition is checked AFTER the first pass)' });
+        ip = inst.bodyStartIndex;
+        break;
+      }
+
+      case IR_OPCODES.SWITCH: {
+        const switchValue = evaluateRawExpression(inst.switchExprSource, runtime.scope);
+        let target = inst.defaultIndex;
+        let matchedCase;
+        for (const candidate of inst.cases ?? []) {
+          if (evaluateExpr(candidate.valueExpr, runtime.scope) === switchValue) {
+            target = candidate.index;
+            matchedCase = candidate;
+            break;
+          }
+        }
+        pushStep(inst, {
+          condition:
+            matchedCase !== undefined
+              ? `switch (${inst.switchExprSource}) → matches case ${formatValue(evaluateExpr(matchedCase.valueExpr, runtime.scope))}`
+              : target !== undefined
+                ? `switch (${inst.switchExprSource}) → no case matches, falling to default`
+                : `switch (${inst.switchExprSource}) → no case matches, and there is no default (nothing runs)`,
+        });
+        if (target === undefined) {
+          ip = inst.bodyEndIndex + 1;
+          break;
+        }
+        blockStack.push({ type: 'switch', bodyEndIndex: inst.bodyEndIndex });
+        ip = target;
+        break;
+      }
+
+      case IR_OPCODES.CASE_LABEL:
+        // A pure jump target — SWITCH already landed `ip` here (or execution fell
+        // through into it from the previous case, which is valid C fall-through).
+        pushStep(inst);
+        ip += 1;
+        break;
 
       case IR_OPCODES.COMPARE:
       case IR_OPCODES.SEARCH_COMPARE: {
@@ -371,14 +531,34 @@ export function executeIR(program) {
       case IR_OPCODES.IF: {
         const isElse = inst.isElse;
         const pass = isElse ? true : evaluateCondition(inst.conditionSource ?? inst.conditionExpr, runtime.scope);
-        pushStep(inst, { condition: isElse ? 'else → true' : `${inst.conditionSource ?? 'condition'} → ${pass}` });
+        pushStep(inst, {
+          condition: isElse ? 'else → true' : `${inst.conditionSource ?? 'condition'} → ${pass}`,
+          branchTaken: pass,
+        });
         if (pass) {
           // Once this clause's own body finishes, skip every remaining elif/else
           // clause in the chain rather than falling through into their condition
           // checks/bodies (a chain with no elif/else has chainEndIndex === bodyEndIndex + 1,
-          // so this is a harmless same-target jump in that case).
+          // so this is a harmless same-target jump in that case). The sibling
+          // clauses that will never run are recorded on the frame now (structurally,
+          // by walking `nextClauseIndex`) but their "skipped" trace steps are NOT
+          // emitted here — see `emitSkippedSiblings`: they fire once this frame is
+          // popped, i.e. AFTER the taken branch's body has actually executed, so the
+          // trace reads in real execution order rather than announcing the skip
+          // before the body that runs first has even started.
           if (inst.bodyEndIndex !== undefined && inst.chainEndIndex !== undefined) {
-            ifStack.push({ bodyEndIndex: inst.bodyEndIndex, chainEndIndex: inst.chainEndIndex });
+            const skipSiblingIndices = [];
+            let siblingIdx = inst.nextClauseIndex;
+            while (siblingIdx !== undefined) {
+              skipSiblingIndices.push(siblingIdx);
+              siblingIdx = instructions[siblingIdx].nextClauseIndex;
+            }
+            blockStack.push({
+              type: 'if',
+              bodyEndIndex: inst.bodyEndIndex,
+              chainEndIndex: inst.chainEndIndex,
+              skipSiblingIndices,
+            });
           }
           ip = inst.thenStartIndex;
         } else {
@@ -388,32 +568,44 @@ export function executeIR(program) {
       }
 
       case IR_OPCODES.BREAK: {
-        if (loopStack.length) {
-          ip = loopStack.at(-1).bodyEndIndex + 1;
-          loopStack.pop();
+        // Jump past the nearest enclosing LOOP *or* `switch` (skipping over any
+        // if-chain frames nested inside it — those are being abandoned along with
+        // the rest of the body, not "closed normally", so they're discarded via
+        // `discardFramesFrom` rather than redirected through their `chainEndIndex`;
+        // any if-chain among them still gets its "else skipped" step emitted, just
+        // AFTER this break step, matching the real order control actually took).
+        const breakableIdx = innermostBreakableIndex();
+        pushStep(inst);
+        if (breakableIdx >= 0) {
+          const breakableFrame = blockStack[breakableIdx];
+          discardFramesFrom(breakableIdx);
+          ip = breakableFrame.bodyEndIndex + 1;
         } else {
           ip += 1;
         }
-        discardStaleIfFrames(ip);
-        pushStep(inst);
         break;
       }
 
       case IR_OPCODES.CONTINUE: {
-        if (loopStack.length) {
-          ip = loopStack.at(-1).bodyEndIndex + 1;
+        // Jump to just past the nearest enclosing loop's body so its own
+        // re-check/increment logic runs next, discarding any if-chain frames
+        // nested inside the CURRENT iteration but keeping the loop frame itself
+        // (still looping).
+        const loopIdx = innermostLoopIndex();
+        pushStep(inst);
+        if (loopIdx >= 0) {
+          discardFramesFrom(loopIdx + 1);
+          ip = blockStack[loopIdx].bodyEndIndex + 1;
         } else {
           ip += 1;
         }
-        discardStaleIfFrames(ip);
-        pushStep(inst);
         break;
       }
 
       case IR_OPCODES.RETURN:
         pushStep(inst);
         ip = instructions.length;
-        discardStaleIfFrames(ip);
+        discardFramesFrom(0);
         break;
 
       default:

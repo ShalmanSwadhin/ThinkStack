@@ -1,4 +1,5 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import app from '../../src/app.js';
 import {
   User,
@@ -169,5 +170,30 @@ describeIfDb('Gamification API', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(profile.body.data.stats.problemsSolved).toBe(1);
+  });
+
+  it('login and profile survive a dangling UserBadge reference (badge deleted/reseeded after being earned)', async () => {
+    // Reproduces a real 500: "Cannot read properties of null (reading '_id')" on
+    // login for any account holding a UserBadge row whose `badgeId` no longer
+    // resolves to a real Badge document (e.g. after `npm run seed:fresh` recreates
+    // the badge catalog with new ids but leaves old join records behind). Mongoose
+    // `.populate('badgeId')` resolves that to `null` rather than throwing, and
+    // GamificationService read `entry.badgeId._id` unconditionally.
+    const { agent, token } = await registerUser('_danglingbadge');
+    await UserBadge.create({
+      userId: (await User.findOne({ email: 'gametest_danglingbadge@example.com' }))._id,
+      badgeId: new mongoose.Types.ObjectId(), // no Badge document has this id
+    });
+
+    const loginRes = await agent.post('/api/v1/auth/login').send({
+      email: 'gametest_danglingbadge@example.com',
+      password: 'TestPass1',
+    });
+    expect(loginRes.status).toBe(200);
+
+    const profileRes = await agent
+      .get('/api/v1/gamification')
+      .set('Authorization', `Bearer ${token}`);
+    expect(profileRes.status).toBe(200);
   });
 });

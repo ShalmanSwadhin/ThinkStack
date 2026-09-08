@@ -77,8 +77,12 @@ print(y, x)`, 'python');
 
   it('trace steps include IR metadata for visualizer', () => {
     const plan = buildTracePlan('x = 5\nprint(x)', 'python');
-    const assignStep = plan.steps.find((s) => s.type === 'assign');
+    // `x = 5` is a fresh binding (Python's first assignment to `x`) — correctly
+    // classified as a declaration, not a generic "assign" (see explain/classify.js;
+    // a real reassignment later would be type 'assign').
+    const assignStep = plan.steps.find((s) => s.type === 'declaration');
     expect(assignStep?.irOp).toBe(IR_OPCODES.DECLARE_VARIABLE);
+    expect(assignStep?.eventType).toBe('Declaration');
     expect(assignStep?.visualEvent).toBe('VariableCreated');
     expect(assignStep?.explanation).toBeTruthy();
   });

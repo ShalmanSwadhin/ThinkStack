@@ -1,4 +1,4 @@
-import { formatTraceOutput, formatTraceValue, formatStepType, parseConditionResult } from './formatTraceValue.js';
+import { formatTraceOutput, formatTraceValue, formatEventLabel, parseConditionResult } from './formatTraceValue.js';
 
 /**
  * Build a tabular model for full manual tracing results (start → end).
@@ -18,12 +18,24 @@ export function buildTraceTableModel(steps, source = '', language = 'python') {
   }
 
   const rows = safeSteps.map((step, index) => {
-    const { text: conditionText, result: conditionResult } = parseConditionResult(step.condition);
+    const { text: conditionText, result: parsedConditionResult } = parseConditionResult(step.condition);
+    // `step.conditionResult` is a real structured true/false/null from the executor
+    // (see explain/classify.js) — prefer it over parsing it back out of the
+    // display-only `condition` text string.
+    const conditionResult = step.conditionResult ?? parsedConditionResult;
     return {
-      step: index + 1,
+      // `executionOrder` is this row's position in ACTUAL execution order (see
+      // engine/visualizer/stepEmitter.js) — not derived from `line`/source order,
+      // and not necessarily monotonic with `line` (a taken branch's body executes,
+      // and only THEN is its sibling branch announced as skipped, even though the
+      // sibling's source line comes first).
+      step: step.executionOrder ?? index + 1,
       line: step.line,
       statement: (step.sourceLine ?? '').trim() || '—',
-      event: formatStepType(step.type),
+      event: formatEventLabel(step),
+      eventType: step.eventType ?? null,
+      eventSubtype: step.eventSubtype ?? null,
+      executionStatus: step.executionStatus ?? null,
       condition: conditionText,
       conditionResult,
       explanation: step.explanation ?? '',

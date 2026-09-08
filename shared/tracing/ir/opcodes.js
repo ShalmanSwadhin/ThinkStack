@@ -84,6 +84,18 @@ export const IR_OPCODES = Object.freeze({
   COMMENT: 'COMMENT',
   STATEMENT: 'STATEMENT',
   NOOP: 'NOOP',
+  // A line handled before normal program execution — `#include`/`#define`/`using`/
+  // `namespace` (C/C++), `import`/`package` (Java), `import`/`export` (JS). Carries
+  // `directiveType`/`directiveSubtype` set by the PARSER (which pattern matched),
+  // not guessed later from source text — see parsers/blockParser.js.
+  DIRECTIVE: 'DIRECTIVE',
+  // A line with no source content at all. Distinct from COMMENT — a blank line is
+  // not a comment, and previously both were folded into the same instruction kind.
+  BLANK_LINE: 'BLANK_LINE',
+  // A `case <value>:` / `default:` label inside a switch body. A pure marker (no
+  // body range of its own) that SWITCH jumps directly to — everything after it
+  // runs normally, falling through into the next label unless a `break` intervenes.
+  CASE_LABEL: 'CASE_LABEL',
 });
 
 /** Maps IR opcodes to visualization event types */
