@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Button from '../components/ui/Button';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
@@ -251,13 +252,25 @@ export default function SettingsPage() {
                 <span className="font-medium text-slate-800 dark:text-slate-200">Username:</span>{' '}
                 {account.username}
               </p>
-              <p>
-                <span className="font-medium text-slate-800 dark:text-slate-200">Email:</span>{' '}
-                {account.email}
-              </p>
+              {account.isGuest ? (
+                <p>
+                  Guest account — your progress is saved in this browser only.{' '}
+                  <Link to="/register" className="font-semibold text-brand-600 hover:underline">
+                    Create a free account
+                  </Link>{' '}
+                  to keep it and open it from any device.
+                </p>
+              ) : (
+                <p>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">Email:</span>{' '}
+                  {account.email}
+                </p>
+              )}
             </CardContent>
           </Card>
 
+          {!account.isGuest && (
+          <>
           <Card>
             <CardHeader>
               <CardTitle>Change password</CardTitle>
@@ -343,6 +356,8 @@ export default function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
+          </>
+          )}
         </div>
       </motion.div>
     </div>

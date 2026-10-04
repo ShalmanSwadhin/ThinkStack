@@ -186,7 +186,21 @@ export default function Navbar({ onMenuToggle }) {
 
           {isAuthenticated ? <NotificationBell /> : null}
 
-          {isAuthenticated ? (
+          {isAuthenticated && user?.isGuest ? (
+            <>
+              <span className="badge-brand hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex">
+                Guest
+              </span>
+              <Link to="/login">
+                <Button variant="ghost" size="sm" className="px-2 sm:px-3">
+                  Log in
+                </Button>
+              </Link>
+              <Link to="/register" className="hidden sm:inline-flex">
+                <Button size="sm">Sign up</Button>
+              </Link>
+            </>
+          ) : isAuthenticated ? (
             <>
               <div className="hidden min-w-0 items-center gap-2.5 md:flex">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-100 to-brand-200 text-sm font-semibold text-brand-700 ring-2 ring-white transition-transform duration-200 hover:scale-105 dark:from-brand-900 dark:to-brand-950 dark:text-brand-300 dark:ring-slate-800">

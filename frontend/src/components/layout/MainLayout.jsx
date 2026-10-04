@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 import Footer from './Footer';
+import GuestBanner from './GuestBanner';
 import MobileNav from './MobileNav';
 import BadgeToastStack from '../../features/gamification/components/BadgeToastStack';
 import UserPreferencesSync from '../../features/settings/components/UserPreferencesSync';
@@ -25,6 +26,7 @@ export function AppLayout() {
   return (
     <div className="flex h-screen min-w-0 flex-col overflow-hidden">
       <Navbar onMenuToggle={toggleMobile} />
+      <GuestBanner />
       <div className="flex min-h-0 min-w-0 flex-1">
         <Sidebar
           collapsed={collapsed}

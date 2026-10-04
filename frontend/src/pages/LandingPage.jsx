@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import { motion } from 'framer-motion';
+import { selectCurrentUser, selectIsAuthenticated } from '../features/auth/authSlice';
 import Button from '../components/ui/Button';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 
@@ -42,6 +44,10 @@ const fadeUp = {
 };
 
 export default function LandingPage() {
+  const isAuthenticated = useSelector(selectIsAuthenticated);
+  const isGuest = useSelector(selectCurrentUser)?.isGuest;
+  const continueLabel = isAuthenticated && !isGuest ? 'View Dashboard' : isGuest ? 'Continue Learning' : 'Continue as Guest';
+
   return (
     <div>
       {/* Hero */}
@@ -66,7 +72,7 @@ export default function LandingPage() {
               </Link>
               <Link to="/dashboard">
                 <Button variant="secondary" size="lg">
-                  View Dashboard
+                  {continueLabel}
                 </Button>
               </Link>
             </div>

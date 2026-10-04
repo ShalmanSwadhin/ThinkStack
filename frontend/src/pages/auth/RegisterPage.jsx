@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const isLoading = useSelector(selectAuthLoading);
   const authError = useSelector(selectAuthError);
+  const isGuest = useSelector((state) => Boolean(state.auth.user?.isGuest));
   const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -60,7 +61,11 @@ export default function RegisterPage() {
   return (
     <AuthLayout
       title="Create account"
-      subtitle="Start learning DSA interactively"
+      subtitle={
+        isGuest
+          ? 'Your guest progress will be kept and move to this account'
+          : 'Start learning DSA interactively'
+      }
       footer={
         <>
           Already have an account?{' '}
