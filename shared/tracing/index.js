@@ -6,6 +6,7 @@
 
 import { TRACING_LANGUAGES, SAMPLE_CODE } from './constants.js';
 import { parseToIR } from './parsers/index.js';
+import { splitSourceLines } from './parsers/common.js';
 import { executeIR } from './engine/executor.js';
 import { clearIRCache, getCacheStats } from './cache/irCache.js';
 import { normalizeProgram } from './ir/program.js';
@@ -28,12 +29,13 @@ export function buildTracePlan(source, language = 'python') {
   const result = executeIR(program);
 
   if (!result.steps.length) {
-    const lineCount = source.split('\n').length;
+    const sourceLines = splitSourceLines(source);
+    const lineCount = sourceLines.length;
     const walkthroughSteps = [];
     for (let i = 0; i < lineCount; i += 1) {
       walkthroughSteps.push({
         line: i + 1,
-        sourceLine: source.split('\n')[i] ?? '',
+        sourceLine: sourceLines[i] ?? '',
         type: 'walkthrough',
         variables: {},
         callStack: [{ name: 'main', line: 1 }],

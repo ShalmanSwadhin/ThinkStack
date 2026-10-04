@@ -66,8 +66,11 @@ export function parseStatementBlock(lines, startIndex, endIndex, instructions, l
       continue;
     }
 
-    if (blockStyle === 'brace' && (line.trim() === '}' || line.trim() === '};' || line.trim() === '{')) {
-      instructions.push(buildStatementInstruction(index, raw));
+    // A lone brace only delimits a block that the parser has already accounted for via
+    // its header — it is structure, not a statement, and never runs. Emitting it as an
+    // instruction made the trace (and its highlighted line) land on `}` whenever an
+    // `if` without an `else` fell through.
+    if (blockStyle === 'brace' && /^[{}]+\s*;?$/.test(line.trim())) {
       i += 1;
       continue;
     }

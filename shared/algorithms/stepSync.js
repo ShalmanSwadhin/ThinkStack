@@ -2,40 +2,7 @@
  * Enriches visualization steps with debugger-like fields:
  * currentCodeLine, currentVariables, currentExplanation
  */
-
-const SEARCHING_LINE_MAP = {
-  init: 2,
-  check: 5,
-  found: 7,
-  'not found': 9,
-  'right half': 9,
-  'left half': 11,
-  jump: 6,
-  probe: 6,
-  scan: 10,
-  block: 3,
-};
-
-const SORTING_LINE_MAP = {
-  start: 2,
-  compare: 5,
-  swap: 6,
-  merge: 8,
-  partition: 6,
-  pivot: 5,
-  complete: 10,
-  'final position': 7,
-  insert: 7,
-  minimum: 6,
-};
-
-function matchLine(description, map, fallback) {
-  const text = (description ?? '').toLowerCase();
-  for (const [keyword, line] of Object.entries(map)) {
-    if (text.includes(keyword)) return line;
-  }
-  return fallback;
-}
+import { inferCodeLine } from './codeSync/lineMapper.js';
 
 function formatArray(values) {
   if (!values?.length) return '[]';
@@ -202,14 +169,13 @@ function buildExplanation(step, algorithmName, variables) {
 }
 
 export function enrichStepWithSyncFields(step, algorithmId, category, config, algorithmName, index, total) {
+  // Steps normally arrive with `codeLine` already set (see codeSync/lineMapper.js); if one
+  // does not, resolve it through the same executable-statement mapping rather than a
+  // second, separate table of line numbers.
   const codeLine =
     step.codeLine ??
     step.currentCodeLine ??
-    matchLine(
-      step.description,
-      category === 'searching' ? SEARCHING_LINE_MAP : SORTING_LINE_MAP,
-      index === 0 ? 1 : index === total - 1 ? 10 : Math.min(2 + (index % 7), 9)
-    );
+    inferCodeLine(algorithmId, category, step.description, index, total);
 
   const variables = {
     ...extractVariables(step, category, config),

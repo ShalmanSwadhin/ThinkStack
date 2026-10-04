@@ -10,8 +10,8 @@ const SKIP = [
   { pattern: /^import\b/, directiveType: 'Module Directive', directiveSubtype: 'Import' },
   { pattern: /^package\b/, directiveType: 'Module Directive', directiveSubtype: 'Package' },
   { pattern: /^(public|private|protected)?\s*(static\s+)?(final\s+)?class\b/, directiveType: 'Class Declaration', directiveSubtype: 'Class' },
+  { pattern: /^(public\s+)?static\s+void\s+main\s*\(/, directiveType: 'Function Declaration', directiveSubtype: 'Main' },
   { pattern: /^(public|private|protected)\b/, directiveType: 'Statement', directiveSubtype: 'Modifier' },
-  { pattern: /^\{$/, directiveType: 'Block Marker', directiveSubtype: 'OpenBrace' },
 ];
 
 export function parseJava(source) {

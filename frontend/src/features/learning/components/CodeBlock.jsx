@@ -7,6 +7,15 @@ import {
 } from 'shared/learning/topicCodeExamples.js';
 import { buildCodeExplanation } from './CodeBlock.utils';
 import { createMonacoMountHandler } from '../../../utils/monacoHelpers.js';
+
+// Samples that are not one of the five main languages (shell sessions, config files,
+// pseudocode) still need a label and an editor language.
+const EXTRA_LANGUAGES = {
+  bash: { label: 'Shell', monaco: 'shell' },
+  json: { label: 'JSON', monaco: 'json' },
+  text: { label: 'Pseudocode', monaco: 'plaintext' },
+};
+
 export default function CodeBlock({
   topicSlug,
   language: defaultLanguage = 'python',
@@ -15,7 +24,24 @@ export default function CodeBlock({
   title,
   examples,
 }) {
-  const [language, setLanguage] = useState(defaultLanguage);
+  const [selectedLanguage, setLanguage] = useState(defaultLanguage);
+
+  // Offer only the languages this lesson actually has code for, so picking a language can
+  // never display a different language's code under its name.
+  const availableLanguages = useMemo(() => {
+    const present = (examples ?? []).filter((example) => example.code?.trim()).map((example) => example.language);
+    if (!present.length) return TOPIC_CODE_LANGUAGES;
+    const main = TOPIC_CODE_LANGUAGES.filter((lang) => present.includes(lang.id));
+    const extra = present
+      .filter((id) => !TOPIC_CODE_LANGUAGES.some((lang) => lang.id === id))
+      .map((id) => ({ id, label: EXTRA_LANGUAGES[id]?.label ?? id }));
+    return [...main, ...extra];
+  }, [examples]);
+
+  const language = availableLanguages.some((lang) => lang.id === selectedLanguage)
+    ? selectedLanguage
+    : availableLanguages[0].id;
+  const languageLabel = availableLanguages.find((lang) => lang.id === language)?.label ?? language;
 
   const resolved = useMemo(() => {
     const dbExamples = examples ?? [];
@@ -23,7 +49,7 @@ export default function CodeBlock({
 
     if (dbMatch?.code?.trim()) {
       return {
-        title: `${language} implementation`,
+        title: `${languageLabel} implementation`,
         source: dbMatch.code,
         explanation: dbMatch.explanation,
       };
@@ -55,7 +81,7 @@ export default function CodeBlock({
     }
 
     return null;
-  }, [topicSlug, language, examples, code, explanation, title]);
+  }, [topicSlug, language, languageLabel, examples, code, explanation, title]);
 
   const codeExplanation = buildCodeExplanation(resolved?.source, resolved?.explanation);
 
@@ -84,7 +110,7 @@ export default function CodeBlock({
           className="rounded-lg border bg-white px-3 py-1.5 text-xs font-medium dark:border-slate-600 dark:bg-slate-800"
           aria-label="Programming language"
         >
-          {TOPIC_CODE_LANGUAGES.map((lang) => (
+          {availableLanguages.map((lang) => (
             <option key={lang.id} value={lang.id}>
               {lang.label}
             </option>
@@ -95,7 +121,7 @@ export default function CodeBlock({
       <div className="bg-slate-950">
         <Editor
           height={`${editorHeight}px`}
-          language={getMonacoLanguage(language)}
+          language={EXTRA_LANGUAGES[language]?.monaco ?? getMonacoLanguage(language)}
           theme="vs-dark"
           value={resolved.source}
           options={{

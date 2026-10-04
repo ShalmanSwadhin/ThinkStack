@@ -13,7 +13,8 @@
  * into "Statement"/"Comment"/"Assignment" respectively, which is semantically wrong
  * and educationally misleading for a tracing tool.
  */
-import { buildTracePlan, extractFinalState, clearIRCache } from '../../../shared/tracing/index.js';
+import { buildTracePlan, extractFinalState, clearIRCache, IR_OPCODES } from '../../../shared/tracing/index.js';
+import { classifyEvent } from '../../../shared/tracing/explain/classify.js';
 
 function wrapC(body) {
   return `#include <stdio.h>\nint main() {\n${body}\n  return 0;\n}`;
@@ -191,20 +192,45 @@ describe('Event classification (Section 2 / Section 6): semantic categories, not
     expect(second.eventType).toBe('Assignment');
   });
 
-  it('a comment line is classified as Comment', () => {
-    const s = steps(wrapC('  // this is a comment\n  int a = 1;'));
-    const commentStep = s.find((st) => st.sourceLine.includes('this is a comment'));
-    expect(commentStep.eventType).toBe('Comment');
-    expect(commentStep.executionStatus).toBe('NotApplicable');
+  it('comments and blank lines are never execution steps', () => {
+    const s = steps(wrapC('  // this is a comment\n  int a = 1;\n\n  int b = 2;'));
+    expect(s.some((st) => st.sourceLine.includes('this is a comment'))).toBe(false);
+    expect(s.some((st) => st.sourceLine.trim() === '')).toBe(false);
+    expect(s.some((st) => st.eventType === 'Comment' || st.eventType === 'Blank')).toBe(false);
+    // ...while the real statements around them are still traced.
+    expect(s.filter((st) => st.eventType === 'Declaration').map((st) => st.sourceLine.trim())).toEqual([
+      'int a = 1;',
+      'int b = 2;',
+    ]);
   });
 
-  it('a blank line is classified as Blank, NEVER as Comment', () => {
-    const s = steps(wrapC('  int a = 1;\n\n  int b = 2;'));
-    const blankStep = s.find((st) => st.sourceLine === '');
-    expect(blankStep).toBeDefined();
-    expect(blankStep.eventType).toBe('Blank');
-    expect(blankStep.eventType).not.toBe('Comment');
-    expect(blankStep.type).not.toBe('comment');
+  it('a comment inside a loop does not "execute" once per iteration', () => {
+    const s = steps('for i in range(3):\n    # runs three times? no — comments never run\n    print(i)\n', 'python');
+    expect(s.filter((st) => st.sourceLine.includes('comments never run'))).toHaveLength(0);
+    expect(s.filter((st) => st.eventType === 'Output')).toHaveLength(3);
+  });
+
+  it('the classifier still labels a comment as Comment and a blank line as Blank, NEVER as Comment', () => {
+    const comment = classifyEvent({ op: IR_OPCODES.COMMENT });
+    expect(comment.eventType).toBe('Comment');
+    expect(comment.executionStatus).toBe('NotApplicable');
+
+    const blank = classifyEvent({ op: IR_OPCODES.BLANK_LINE });
+    expect(blank.eventType).toBe('Blank');
+    expect(blank.eventType).not.toBe('Comment');
+  });
+
+  it('a lone closing brace is structure, not a statement, and never becomes a step', () => {
+    const s = steps('for (let i = 0; i < 2; i++) {\n  if (i === 0) {\n    console.log("zero");\n  }\n}\n', 'javascript');
+    expect(s.some((st) => /^[{}]+;?$/.test(st.sourceLine.trim()))).toBe(false);
+    expect(s.some((st) => st.eventType === 'Statement' && st.eventSubtype === 'Generic')).toBe(false);
+  });
+
+  it('main() headers are labeled as program-entry declarations, not as executed statements', () => {
+    const c = steps(wrapC('  int a = 1;')).find((st) => st.sourceLine.includes('int main()'));
+    expect(c.eventType).toBe('Function Declaration');
+    expect(c.eventSubtype).toBe('Main');
+    expect(c.executionStatus).toBe('NotApplicable');
   });
 
   it('printf is classified as Output', () => {

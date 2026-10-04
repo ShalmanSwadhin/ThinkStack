@@ -87,14 +87,33 @@ function makeProblem({
   };
 }
 
+/** Stable key for a problem template, e.g. "Binary Search Position" -> "binary-search-position". */
+export const templateKey = (title) => toSlug(title);
+
+export const PROBLEM_TEMPLATE_KEYS = new Set(
+  Object.values(PROBLEM_TEMPLATES).flatMap((templates) => templates.map((template) => templateKey(template.title)))
+);
+
 /**
  * Generate 300 curated DSA problems: 100 easy, 130 medium, 70 hard.
+ *
+ * A problem is linked to a lesson ONLY when that lesson lists the problem's template under
+ * `practice:` (see lessons/schema.js). Links used to be assigned round-robin across all
+ * lessons, which is how "Count Vowels in String" ended up on "Version Control Basics".
+ * Only the first problem generated from each template carries the lesson links, so a
+ * lesson shows one relevant problem per template instead of ten numbered copies.
  */
 export function buildProblemBank() {
   const catalog = buildLessonCatalog();
-  const topicSlugs = catalog.map((l) => l.slug);
-  const problems = [];
+  const lessonsByTemplate = new Map();
+  for (const lesson of catalog) {
+    for (const key of lesson.practice) {
+      if (!lessonsByTemplate.has(key)) lessonsByTemplate.set(key, []);
+      lessonsByTemplate.get(key).push(lesson);
+    }
+  }
 
+  const problems = [];
   const counts = { easy: 100, medium: 130, hard: 70 };
   let problemNum = 0;
 
@@ -103,8 +122,8 @@ export function buildProblemBank() {
     for (let i = 0; i < count; i++) {
       problemNum += 1;
       const template = templates[i % templates.length];
-      const topicSlug = topicSlugs[problemNum % topicSlugs.length];
-      const moduleSlug = topicSlug.split('-').slice(0, 2).join('-');
+      const isRepresentative = i < templates.length;
+      const linkedLessons = isRepresentative ? lessonsByTemplate.get(templateKey(template.title)) ?? [] : [];
 
       const slug = `${difficulty}-${toSlug(template.title)}-${problemNum}`;
       const title = `${template.title} ${problemNum}`;
@@ -114,9 +133,11 @@ export function buildProblemBank() {
           slug,
           title,
           difficulty: DIFFICULTY[difficulty.toUpperCase()],
-          tags: [difficulty, moduleSlug, ...template.title.toLowerCase().split(' ').slice(0, 2)],
-          topicSlugs: [topicSlug],
-          description: `${template.desc}\n\nProblem #${problemNum} — ${template.input}.`,
+          tags: [difficulty, ...template.title.toLowerCase().split(' ').slice(0, 2)],
+          topicSlugs: linkedLessons.map((lesson) => lesson.slug),
+          description: `${template.desc}
+
+Problem #${problemNum} — ${template.input}.`,
           constraints: difficulty === 'easy' ? '1 ≤ n ≤ 10⁴' : difficulty === 'medium' ? '1 ≤ n ≤ 10⁵' : '1 ≤ n ≤ 10⁶',
           examples: [
             {
@@ -134,7 +155,7 @@ export function buildProblemBank() {
             },
           ],
           companies: [COMPANIES[problemNum % COMPANIES.length], COMPANIES[(problemNum + 7) % COMPANIES.length]],
-          editorial: buildEditorial(title, template, difficulty, topicSlug),
+          editorial: buildEditorial(title, template, difficulty, linkedLessons[0]?.slug),
         })
       );
     }
@@ -144,7 +165,8 @@ export function buildProblemBank() {
 }
 
 function buildEditorial(title, template, difficulty, topicSlug) {
-  return `## ${title}\n\n**Related lesson:** \`${topicSlug}\`\n\n### Problem Statement\n${template.desc}\n\n### Brute Force\nEnumerate all possibilities — correct but may exceed time limits for ${difficulty} constraints.\n\n### Optimized Solution\nApply the standard ${difficulty}-level pattern: use appropriate data structures, maintain invariants, and stop early when possible.\n\n### Complexity\nTypical ${difficulty} problems require ${difficulty === 'easy' ? 'O(n) or O(n log n)' : difficulty === 'medium' ? 'O(n log n) or O(n)' : 'O(n log n) or O(n²) with optimizations'} time.`;
+  const related = topicSlug ? `**Related lesson:** \`${topicSlug}\`\n\n` : '';
+  return `## ${title}\n\n${related}### Problem Statement\n${template.desc}\n\n### Brute Force\nEnumerate all possibilities — correct but may exceed time limits for ${difficulty} constraints.\n\n### Optimized Solution\nApply the standard ${difficulty}-level pattern: use appropriate data structures, maintain invariants, and stop early when possible.\n\n### Complexity\nTypical ${difficulty} problems require ${difficulty === 'easy' ? 'O(n) or O(n log n)' : difficulty === 'medium' ? 'O(n log n) or O(n)' : 'O(n log n) or O(n²) with optimizations'} time.`;
 }
 
 function generateHiddenInput(difficulty, seed) {

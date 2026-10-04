@@ -40,7 +40,8 @@ describeIfDb('Learning API', () => {
       order: 1,
       status: 'published',
       xpReward: 50,
-      content: buildTopicContent('Test Arrays'),
+      // A real, hand-written lesson body — the scaffold used for drafts has no code examples.
+      content: buildTopicContent('What Is Programming'),
       ...overrides,
     });
 

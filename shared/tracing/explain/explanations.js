@@ -68,6 +68,9 @@ export function explainInstruction(inst, scope, output, extra = {}) {
       return 'This is a blank line. It has no effect on execution.';
 
     case IR_OPCODES.DIRECTIVE: {
+      if (inst.directiveSubtype === 'Main') {
+        return 'This declares the program entry point. Execution begins with the first statement inside main.';
+      }
       const kind = (inst.directiveType ?? 'directive').toLowerCase();
       return `This is a ${kind} (${inst.directiveSubtype ?? 'directive'}), handled before normal program execution — it does not itself run as a statement.`;
     }

@@ -1,17 +1,11 @@
-export { buildQuizQuestionsForLesson, buildSupplementaryQuizBank } from '../generators/quizBuilder.js';
-import { buildQuizQuestionsForLesson } from '../generators/quizBuilder.js';
+import { buildQuizForTitle } from '../curriculum/index.js';
 
-/** @deprecated Use buildQuizQuestionsForLesson with lesson metadata */
+/**
+ * Quiz questions for a topic by title: the lesson's hand-written quiz when the title is a
+ * curriculum lesson, otherwise a neutral scaffold (admin-created drafts, test topics).
+ */
 export function buildQuizQuestions(topicTitle) {
-  return buildQuizQuestionsForLesson({
-    title: topicTitle,
-    moduleTitle: 'General',
-    slug: topicTitle.toLowerCase().replace(/\s+/g, '-'),
-    order: 0,
-    complexity: { time: 'O(n)', space: 'O(1)' },
-    applications: ['Technical interviews'],
-    pitfalls: ['Ignoring edge cases'],
-  });
+  return buildQuizForTitle(topicTitle);
 }
 
 export default buildQuizQuestions;

@@ -101,7 +101,7 @@ export function classifyEvent(inst, extra = {}) {
     case IR_OPCODES.WHILE_LOOP:
       return { eventType: 'Loop', eventSubtype: 'While', executionStatus: 'Executed', conditionResult: extra.loopContinues ?? null };
     case IR_OPCODES.FOR_EACH:
-      return { eventType: 'Loop', eventSubtype: 'ForEach', executionStatus: 'Executed', conditionResult: null };
+      return { eventType: 'Loop', eventSubtype: 'ForEach', executionStatus: 'Executed', conditionResult: extra.loopContinues ?? null };
     case IR_OPCODES.DO_WHILE:
       return { eventType: 'Loop', eventSubtype: 'DoWhile', executionStatus: 'Executed', conditionResult: extra.loopContinues ?? null };
 

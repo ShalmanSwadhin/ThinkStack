@@ -209,12 +209,15 @@ export default function VisualizerWorkspacePage() {
           </div>
 
           <div className="order-1 min-w-0 space-y-6 xl:order-2">
-            <div className="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-[3fr_2fr]">
+            {/* minmax(0, …) lets each track shrink below its content's minimum width. A bare
+                `3fr` is really minmax(auto, 3fr), so a wide visualization (many input values)
+                used to push the code panel out of the viewport. */}
+            <div className="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
               <VisualizerStage
                 key={`${resolvedId}-${runKey}`}
                 rendererType={rendererType}
                 step={player.currentStep}
-                className="min-h-[380px] sm:min-h-[480px] lg:min-h-[560px]"
+                className="min-h-[380px] min-w-0 sm:min-h-[480px] lg:min-h-[560px]"
               />
               <CodeSyncPanel
                 algorithmId={resolvedId}

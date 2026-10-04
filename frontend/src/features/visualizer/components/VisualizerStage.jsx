@@ -20,7 +20,8 @@ export default function VisualizerStage({ rendererType, step, className }) {
         <p className="mb-4 min-h-[48px] text-sm leading-relaxed text-slate-700 dark:text-slate-300">
           {step?.description ?? 'Generate steps to start visualization.'}
         </p>
-        <div className="overflow-hidden">
+        {/* Large visualizations scroll inside this area instead of widening the page. */}
+        <div className="min-w-0 overflow-x-auto">
           <Renderer state={step?.state} />
         </div>
       </CardContent>

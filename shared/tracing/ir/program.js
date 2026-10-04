@@ -25,8 +25,16 @@ export function createInstruction(op, line, sourceLine, fields = {}) {
   return { op, line, sourceLine, ...fields };
 }
 
+// A file's final newline terminates its last line; it does not start a new (phantom) one,
+// and CRLF endings must not leak a stray "\r" into any line.
+export function splitSourceLines(source) {
+  const parts = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
+  if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
+  return parts;
+}
+
 export function createProgram(language, source, instructions) {
-  const lines = source.split('\n');
+  const lines = splitSourceLines(source);
   return {
     language,
     lineCount: lines.length,

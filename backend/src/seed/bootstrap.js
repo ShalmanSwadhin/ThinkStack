@@ -15,7 +15,6 @@ import { buildTopics } from './data/topics.js';
 import { PROBLEMS } from './generators/problemBank.js';
 import { BADGES } from './data/badges.js';
 import { CERTIFICATES } from './data/certificates.js';
-import { buildQuizQuestionsForLesson } from './generators/quizBuilder.js';
 import { CONTESTS } from './data/contests.js';
 import { buildVisualizerSeedData } from './data/visualizers.js';
 import ensureAdmin from './ensureAdmin.js';
@@ -101,7 +100,7 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
   for (const topicData of TOPICS) {
     const existingTopic = await Topic.findOne({ slug: topicData.slug }).select('_id').lean();
 
-    const { visualizerId, moduleId, content, ...topicFields } = topicData;
+    const { visualizerId, moduleId, content, quiz: lessonQuiz, practice: _practice, ...topicFields } = topicData;
 
     const topicDocument = {
       ...topicFields,
@@ -109,8 +108,10 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
       status: 'published',
       xpReward: 50,
       createdBy: adminId,
+      // Only lessons that genuinely demonstrate a visualizer link to one; `null` hides the
+      // "Open visualizer" link for everything else.
       animationConfig: {
-        type: visualizerId ?? topicData.slug,
+        type: visualizerId ?? null,
         defaultParams: {},
       },
     };
@@ -125,20 +126,7 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
     else if (mode === 'sync') stats.topics.updated += 1;
     else stats.topics.existing += 1;
 
-    const lessonMeta = {
-      title: topicData.title,
-      moduleTitle: topicData.tags?.find((t) => t.startsWith('module:'))?.replace('module:', '') ?? moduleId,
-      slug: topicData.slug,
-      order: topicData.order,
-      complexity: {
-        time: content.timeComplexity,
-        space: content.spaceComplexity,
-      },
-      applications: content.applications ?? [],
-      pitfalls: content.commonMistakes ?? [],
-    };
-
-    const questions = buildQuizQuestionsForLesson(lessonMeta);
+    const questions = lessonQuiz;
     totalQuestions += questions.length;
 
     const quizDocument = {
@@ -233,8 +221,10 @@ async function ensureProblems(adminId, topicMap, mode, stats) {
     const hasRelated = Array.isArray(topicDoc?.relatedProblems) && topicDoc.relatedProblems.length > 0;
     if (hasRelated && mode !== 'sync') continue;
 
+    // In sync mode a lesson with no linked problems must end up with none — leaving the
+    // previous (round-robin) links in place is what attached unrelated problems to it.
     const relatedIds = problemIdsByTopic.get(slug) || [];
-    if (relatedIds.length === 0) continue;
+    if (relatedIds.length === 0 && mode !== 'sync') continue;
 
     await Topic.findByIdAndUpdate(topic._id, { relatedProblems: relatedIds.slice(0, 10) });
   }
@@ -398,16 +388,25 @@ export async function bootstrapDatabase(options = {}) {
   const demoUser = await ensureDemoUser();
   if (demoUser) stats.demo = demoUser.email;
 
-  await ensureBadges(mode, stats);
-  await ensureCertificates(mode, stats);
-  await ensureVisualizers(mode, stats);
+  // `only: 'lessons'` refreshes just the learning content (lessons, their quizzes and the
+  // problem links) and leaves badges, contests, daily challenges etc. untouched.
+  const lessonsOnly = options.only === 'lessons';
+
+  if (!lessonsOnly) {
+    await ensureBadges(mode, stats);
+    await ensureCertificates(mode, stats);
+    await ensureVisualizers(mode, stats);
+  }
 
   const { topicMap, orderedTopics } = await ensureTopicsAndQuizzes(admin._id, mode, stats);
   await wireTopicNavigation(topicMap, orderedTopics, mode);
   await ensureProblems(admin._id, topicMap, mode, stats);
-  await ensureContests(admin._id, mode, stats);
-  await ensureDailyChallenges(mode, stats);
-  await ensureAnnouncement(admin._id, mode, stats);
+
+  if (!lessonsOnly) {
+    await ensureContests(admin._id, mode, stats);
+    await ensureDailyChallenges(mode, stats);
+    await ensureAnnouncement(admin._id, mode, stats);
+  }
 
   stats.totals = {
     topics: await Topic.countDocuments(),

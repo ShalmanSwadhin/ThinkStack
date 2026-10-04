@@ -100,11 +100,13 @@ export default function TopicReader({
         </Section>
 
         <Section id="example" title="Example">
-          <p className="leading-relaxed text-slate-700 dark:text-slate-300">
-            {content.example ??
+          <MarkdownContent
+            content={
+              content.example ??
               content.realWorldExample ??
-              'Walk through a concrete example to see how this data structure or algorithm behaves in practice.'}
-          </p>
+              'Walk through a concrete example to see how this data structure or algorithm behaves in practice.'
+            }
+          />
         </Section>
 
         <Section id="real-world" title="Real-World Example">

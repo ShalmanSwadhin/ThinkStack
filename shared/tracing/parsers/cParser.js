@@ -17,7 +17,7 @@ const SKIP = [
   { pattern: /^#(if|ifdef|ifndef|else|elif|endif|pragma|undef)\b/, directiveType: 'Preprocessor Directive', directiveSubtype: 'Directive' },
   { pattern: /^using\b/, directiveType: 'Preprocessor Directive', directiveSubtype: 'Using' },
   { pattern: /^namespace\b/, directiveType: 'Preprocessor Directive', directiveSubtype: 'Namespace' },
-  { pattern: /^\{$/, directiveType: 'Block Marker', directiveSubtype: 'OpenBrace' },
+  { pattern: /^(int|void)\s+main\s*\([^)]*\)\s*\{?$/, directiveType: 'Function Declaration', directiveSubtype: 'Main' },
 ];
 
 export function parseC(source, language = 'c') {

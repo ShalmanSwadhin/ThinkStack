@@ -14,7 +14,7 @@ export default function ArrayRenderer({ state }) {
   const count = state.values.length;
 
   return (
-    <div className="w-full overflow-hidden px-2">
+    <div className="w-full overflow-x-auto px-2">
       <div className="flex h-64 w-full items-end justify-stretch gap-1 sm:h-80 sm:gap-2 md:h-96">
         {state.values.map((value, index) => {
           const isPrimary = state.highlights?.includes(index);
@@ -23,7 +23,7 @@ export default function ArrayRenderer({ state }) {
           return (
             <div
               key={`${index}-${value}`}
-              className="flex min-w-0 flex-1 flex-col items-center gap-2"
+              className="flex min-w-[1.5rem] flex-1 flex-col items-center gap-2"
               style={{ maxWidth: `${100 / count}%` }}
             >
               <motion.div

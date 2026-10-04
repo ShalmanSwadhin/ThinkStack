@@ -75,6 +75,13 @@ export function executeIR(program) {
         });
         ip = frame.bodyStartIndex;
       } else {
+        // The exhausted-iterable check is a real event too (the "no more items" test a
+        // for-each loop makes before leaving), so loop exit is visible in the trace the
+        // same way it already is for `while` and C-style `for` loops.
+        pushStep(instructions[frame.headerIndex], {
+          condition: `no more items in the collection (loop finished after ${frame.iterable.length} iteration${frame.iterable.length === 1 ? '' : 's'})`,
+          loopContinues: false,
+        });
         blockStack.pop();
       }
       return;
@@ -173,8 +180,15 @@ export function executeIR(program) {
     }
   };
 
-  while (ip < instructions.length) {
+  for (;;) {
+    // Block boundaries are resolved at the top of EVERY iteration — including the final
+    // one, reached when `ip` has just run off the end of the program. Resolving them
+    // only after certain statement kinds (as individual cases once did) made whether
+    // an enclosing loop continued depend on which statement type happened to be last:
+    // a `break`/`continue` that jumped to the end of the program silently terminated
+    // every loop still open around it.
     advancePastClosedBlocks();
+    if (ip >= instructions.length) break;
 
     const inst = instructions[ip];
     // Clear any side effects (`++`/`--` on a variable other than this instruction's
@@ -183,8 +197,11 @@ export function executeIR(program) {
     drainSideEffects(runtime.scope);
 
     switch (inst.op) {
+      // Comments and blank lines are not executed — they do nothing at runtime, so they
+      // are never trace steps (a comment inside a loop would otherwise "run" once per
+      // iteration, and the highlighted line would land on text that never executes).
       case IR_OPCODES.COMMENT:
-        pushStep(inst);
+      case IR_OPCODES.BLANK_LINE:
         ip += 1;
         break;
 
@@ -232,7 +249,6 @@ export function executeIR(program) {
           declaratorNames: inst.declaratorNames,
         });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -250,7 +266,6 @@ export function executeIR(program) {
         const sideEffects = drainSideEffects(runtime.scope);
         pushStep(inst, { target: inst.arrayName, index: idx, newValue: value, sideEffects });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -268,7 +283,6 @@ export function executeIR(program) {
         const sideEffects = drainSideEffects(runtime.scope);
         pushStep(inst, { sideEffects });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -299,7 +313,6 @@ export function executeIR(program) {
         const sideEffects = drainSideEffects(runtime.scope);
         pushStep(inst, { sideEffects });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -313,7 +326,6 @@ export function executeIR(program) {
         // line this is, even though its runtime effect can't be simulated.
         pushStep(inst, { inputNotSimulated: true });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -326,7 +338,6 @@ export function executeIR(program) {
         const sideEffects = drainSideEffects(runtime.scope);
         pushStep(inst, { sideEffects });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 
@@ -524,7 +535,6 @@ export function executeIR(program) {
         }
         pushStep(inst, { target: arrName, changed: arrName });
         ip += 1;
-        advancePastClosedBlocks();
         break;
       }
 

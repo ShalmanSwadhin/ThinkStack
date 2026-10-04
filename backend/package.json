@@ -10,6 +10,7 @@
     "seed": "node src/seed/index.js",
     "seed:fresh": "node src/seed/index.js --fresh",
     "seed:sync": "node src/seed/index.js --sync",
+    "seed:lessons": "node src/seed/index.js --sync --lessons",
     "lint": "eslint src --ext .js",
     "test": "node --experimental-vm-modules ../node_modules/jest/bin/jest.js --passWithNoTests"
   },

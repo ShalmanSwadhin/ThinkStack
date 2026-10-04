@@ -3,7 +3,7 @@
  */
 
 import { IR_OPCODES } from '../ir/opcodes.js';
-import { createInstruction } from '../ir/program.js';
+import { createInstruction, splitSourceLines } from '../ir/program.js';
 import { parseExpressionString, splitTopLevelCommas } from '../ir/expressions.js';
 import { normalizeDeclaredType } from '../engine/typeSystem.js';
 
@@ -36,8 +36,10 @@ export function getIndent(raw) {
   return match ? match[1].length : 0;
 }
 
+export { splitSourceLines };
+
 export function parseLines(source) {
-  return source.split('\n').map((raw, index) => ({
+  return splitSourceLines(source).map((raw, index) => ({
     raw,
     index,
     indent: getIndent(raw),
