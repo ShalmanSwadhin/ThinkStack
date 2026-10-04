@@ -25,6 +25,10 @@ export const registerValidator = [
     .withMessage('Password must contain a number'),
 ];
 
+export const guestResumeValidator = [
+  body('guestKey').isString().isHexadecimal().isLength({ min: 64, max: 64 }).withMessage('Invalid guest key'),
+];
+
 export const loginValidator = [
   emailNormalizer,
   body('password').notEmpty().withMessage('Password is required'),

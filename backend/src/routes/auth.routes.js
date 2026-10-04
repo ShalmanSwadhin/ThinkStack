@@ -3,6 +3,9 @@ import rateLimit from 'express-rate-limit';
 import {
   register,
   login,
+  createGuest,
+  resumeGuest,
+  upgradeGuest,
   refresh,
   logout,
   logoutAll,
@@ -14,6 +17,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import {
   registerValidator,
+  guestResumeValidator,
   loginValidator,
   forgotPasswordValidator,
   resetPasswordValidator,
@@ -37,6 +41,34 @@ const authLimiter =
         },
       });
 
+const guestLimiter =
+  process.env.NODE_ENV === 'test'
+    ? noop
+    : rateLimit({
+        windowMs: 60 * 60 * 1000,
+        max: 30,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: {
+          success: false,
+          error: { message: 'Too many guest sessions started. Try again later.' },
+        },
+      });
+
+const guestResumeLimiter =
+  process.env.NODE_ENV === 'test'
+    ? noop
+    : rateLimit({
+        windowMs: 60 * 1000,
+        max: 60,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { success: false, error: { message: 'Too many requests. Try again shortly.' } },
+      });
+
+router.post('/guest', guestLimiter, createGuest);
+router.post('/guest/resume', guestResumeLimiter, guestResumeValidator, validate, resumeGuest);
+router.post('/guest/upgrade', authenticate, authLimiter, registerValidator, validate, upgradeGuest);
 router.post('/register', authLimiter, registerValidator, validate, register);
 router.post('/login', authLimiter, loginValidator, validate, login);
 router.post('/refresh', refresh);

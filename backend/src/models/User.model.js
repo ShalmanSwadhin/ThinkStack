@@ -76,6 +76,8 @@ const userSchema = new mongoose.Schema(
     gamification: { type: gamificationSchema, default: () => ({}) },
     stats: { type: statsSchema, default: () => ({}) },
     preferences: { type: preferencesSchema, default: () => ({}) },
+    isGuest: { type: Boolean, default: false },
+    guestKeyHash: { type: String, select: false },
     isActive: { type: Boolean, default: true },
     isSuspended: { type: Boolean, default: false },
     loginAttempts: { type: Number, default: 0, select: false },
@@ -96,6 +98,7 @@ userSchema.pre('save', function syncLevel(next) {
 
 userSchema.index({ 'gamification.xp': -1 });
 userSchema.index({ role: 1 });
+userSchema.index({ guestKeyHash: 1 }, { unique: true, sparse: true });
 
 userSchema.methods.toPublicJSON = function toPublicJSON() {
   const obj = this.toObject();

@@ -2,7 +2,15 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import authApi, { applyAuthSession, extractError } from './authService';
 import { logout as logoutAction } from './authSlice';
 import { setTheme } from '../theme/themeSlice';
-import { markExplicitLogout, resetAuthInterceptor, clearPersistedSession } from '../../services/api';
+import {
+  markExplicitLogout,
+  resetAuthInterceptor,
+  clearPersistedSession,
+  setSessionIsGuest,
+} from '../../services/api';
+import { clearGuestKey, createGuestSession, resumeGuestSession } from '../../services/guestSession';
+
+let guestStartInFlight = null;
 
 const syncUserTheme = (dispatch, user) => {
   if (user?.preferences?.theme) {
@@ -12,13 +20,23 @@ const syncUserTheme = (dispatch, user) => {
 
 export const registerUser = createAsyncThunk(
   'auth/register',
-  async (formData, { rejectWithValue, dispatch }) => {
+  async (formData, { rejectWithValue, dispatch, getState }) => {
     try {
       const payload = {
         username: formData.username.trim(),
         email: formData.email.trim(),
         password: formData.password,
       };
+
+      // A guest who signs up keeps everything: the same account is upgraded in place.
+      const { user: currentUser, accessToken } = getState().auth;
+      if (currentUser?.isGuest) {
+        const { user } = await authApi.upgradeGuest(payload);
+        clearGuestKey();
+        setSessionIsGuest(false);
+        return { user, accessToken };
+      }
+
       const data = applyAuthSession(await authApi.register(payload));
       syncUserTheme(dispatch, data.user);
       return data;
@@ -37,6 +55,29 @@ export const loginUser = createAsyncThunk(
         password: formData.password,
       };
       const data = applyAuthSession(await authApi.login(payload));
+      syncUserTheme(dispatch, data.user);
+      return data;
+    } catch (error) {
+      return rejectWithValue(extractError(error));
+    }
+  }
+);
+
+// Resumes this browser's existing guest if it has one, otherwise creates a new guest. The
+// in-flight promise stops double-mounts from minting two guest accounts.
+export const startGuestSession = createAsyncThunk(
+  'auth/guest',
+  async (_, { rejectWithValue, dispatch }) => {
+    if (!guestStartInFlight) {
+      guestStartInFlight = (async () => (await resumeGuestSession()) ?? createGuestSession())().finally(
+        () => {
+          guestStartInFlight = null;
+        }
+      );
+    }
+
+    try {
+      const data = applyAuthSession(await guestStartInFlight);
       syncUserTheme(dispatch, data.user);
       return data;
     } catch (error) {
@@ -111,6 +152,20 @@ export const authExtraReducers = (builder) => {
     .addCase(loginUser.rejected, (state, action) => {
       state.isLoading = false;
       state.error = action.payload?.message || 'Login failed';
+    })
+    .addCase(startGuestSession.pending, (state) => {
+      state.isLoading = true;
+      state.error = null;
+    })
+    .addCase(startGuestSession.fulfilled, (state, action) => {
+      state.isLoading = false;
+      state.user = action.payload.user;
+      state.accessToken = action.payload.accessToken;
+      state.isAuthenticated = true;
+    })
+    .addCase(startGuestSession.rejected, (state, action) => {
+      state.isLoading = false;
+      state.error = action.payload?.message || 'Could not start a guest session';
     })
     .addCase(refreshSession.fulfilled, (state, action) => {
       if (!action.payload?.accessToken) {

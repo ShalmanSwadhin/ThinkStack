@@ -1,8 +1,4 @@
-import api, {
-  setAccessToken,
-  markPersistedSession,
-  clearPersistedSession,
-} from '../../services/api';
+import api, { setAccessToken, setSessionIsGuest, markPersistedSession } from '../../services/api';
 
 const extractError = (error) => {
   const message = error.response?.data?.error?.message || error.message || 'Something went wrong';
@@ -18,6 +14,11 @@ export const authApi = {
 
   login: async (data) => {
     const response = await api.post('/auth/login', data);
+    return response.data.data;
+  },
+
+  upgradeGuest: async (data) => {
+    const response = await api.post('/auth/guest/upgrade', data);
     return response.data.data;
   },
 
@@ -49,6 +50,7 @@ export const authApi = {
 export const applyAuthSession = (data) => {
   if (data?.accessToken) {
     setAccessToken(data.accessToken);
+    setSessionIsGuest(data.user?.isGuest);
     markPersistedSession();
   }
   return data;

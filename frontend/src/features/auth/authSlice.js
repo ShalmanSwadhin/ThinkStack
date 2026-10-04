@@ -1,5 +1,5 @@
 import { createSlice } from '@reduxjs/toolkit';
-import { setAccessToken, clearAccessToken } from '../../services/api';
+import { setAccessToken, clearAccessToken, setSessionIsGuest } from '../../services/api';
 import { authExtraReducers } from './authThunks';
 
 const initialState = {
@@ -22,6 +22,7 @@ const authSlice = createSlice({
       state.isAuthenticated = true;
       state.error = null;
       setAccessToken(accessToken);
+      setSessionIsGuest(user?.isGuest);
     },
     logout: (state) => {
       state.user = null;
@@ -29,6 +30,7 @@ const authSlice = createSlice({
       state.isAuthenticated = false;
       state.error = null;
       clearAccessToken();
+      setSessionIsGuest(false);
     },
     setLoading: (state, action) => {
       state.isLoading = action.payload;

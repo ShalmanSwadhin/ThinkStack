@@ -32,7 +32,8 @@ const formatSettings = (user) => ({
   },
   account: {
     username: user.username,
-    email: user.email,
+    email: user.isGuest ? null : user.email,
+    isGuest: Boolean(user.isGuest),
     role: user.role,
     createdAt: user.createdAt,
   },

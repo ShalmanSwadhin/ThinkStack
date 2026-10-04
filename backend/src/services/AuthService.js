@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { ROLES } from 'shared/constants';
 import { User } from '../models/index.js';
 import userRepository from '../repositories/UserRepository.js';
@@ -18,7 +19,8 @@ const normalizeEmail = (email) => email.trim().toLowerCase();
 const formatUser = (user) => ({
   id: user._id.toString(),
   username: user.username,
-  email: user.email,
+  email: user.isGuest ? null : user.email,
+  isGuest: Boolean(user.isGuest),
   role: user.role,
   profile: user.profile,
   gamification: user.gamification,
@@ -72,7 +74,7 @@ export class AuthService {
       .select('+passwordHash +loginAttempts +lockUntil')
       .exec();
 
-    if (!user) {
+    if (!user || user.isGuest) {
       throw new AppError('Invalid email or password', 401);
     }
 
@@ -111,6 +113,87 @@ export class AuthService {
       user: formatUser(refreshedUser),
       ...tokens,
     };
+  }
+
+  // A guest is a real but anonymous account. Its only credential is `guestKey`, a random
+  // secret held by the browser that created it; the server stores just a hash of it.
+  async createGuest({ userAgent, ipAddress } = {}) {
+    const guestKey = crypto.randomBytes(32).toString('hex');
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 4);
+
+    let user;
+    for (let attempt = 0; attempt < 3 && !user; attempt += 1) {
+      const candidate = new User({
+        username: `guest_${crypto.randomBytes(4).toString('hex')}`,
+        passwordHash,
+        role: ROLES.STUDENT,
+        isGuest: true,
+        guestKeyHash: tokenService.hashToken(guestKey),
+        profile: { displayName: 'Guest' },
+        preferences: { emailNotifications: false },
+      });
+      candidate.email = `guest.${candidate._id}@guest.thinkstack.local`;
+
+      try {
+        user = await candidate.save();
+      } catch (error) {
+        if (error?.code !== 11000 || attempt === 2) throw error;
+      }
+    }
+
+    const tokens = await this.issueTokens(user, { userAgent, ipAddress });
+    return { user: formatUser(user), guestKey, ...tokens };
+  }
+
+  async resumeGuest(guestKey, { userAgent, ipAddress } = {}) {
+    const user = await User.findOne({
+      guestKeyHash: tokenService.hashToken(String(guestKey)),
+      isGuest: true,
+    }).exec();
+
+    if (!user || !user.isActive || user.isSuspended) {
+      throw new AppError('Guest session not found', 401);
+    }
+
+    await gamificationService.recordLogin(user._id.toString());
+    const refreshedUser = await User.findById(user._id).exec();
+    const tokens = await this.issueTokens(refreshedUser, { userAgent, ipAddress });
+
+    return { user: formatUser(refreshedUser), ...tokens };
+  }
+
+  // Turns the signed-in guest into a normal account in place, so everything they did as a
+  // guest stays attached to the same user id.
+  async upgradeGuest(userId, { username, email, password }) {
+    validatePasswordStrength(password);
+
+    const user = await User.findById(userId).select('+passwordHash +guestKeyHash').exec();
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    if (!user.isGuest) {
+      throw new AppError('Only guest accounts can be upgraded', 400);
+    }
+
+    const existingEmail = await userRepository.findByEmail(normalizeEmail(email));
+    if (existingEmail) {
+      throw new AppError('Email already registered', 409);
+    }
+    const existingUsername = await userRepository.findByUsername(username);
+    if (existingUsername) {
+      throw new AppError('Username already taken', 409);
+    }
+
+    user.username = username.toLowerCase();
+    user.email = normalizeEmail(email);
+    user.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    user.isGuest = false;
+    user.guestKeyHash = undefined;
+    user.profile.displayName = username;
+    user.preferences.emailNotifications = true;
+    await user.save();
+
+    return { user: formatUser(user) };
   }
 
   async issueTokens(user, { userAgent, ipAddress }) {
@@ -189,7 +272,7 @@ export class AuthService {
       .select('+passwordResetToken +passwordResetExpires')
       .exec();
 
-    if (!user) {
+    if (!user || user.isGuest) {
       return { message: 'If that email exists, a reset link has been sent.' };
     }
 

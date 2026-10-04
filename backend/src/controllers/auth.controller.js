@@ -51,6 +51,28 @@ export const login = asyncHandler(async (req, res) => {
   sendSuccess(res, { user: result.user, accessToken: result.accessToken }, 'Login successful');
 });
 
+export const createGuest = asyncHandler(async (req, res) => {
+  const result = await authService.createGuest(getClientMeta(req));
+  setRefreshCookie(res, result.refreshToken);
+  sendSuccess(
+    res,
+    { user: result.user, accessToken: result.accessToken, guestKey: result.guestKey },
+    'Guest session started',
+    201
+  );
+});
+
+export const resumeGuest = asyncHandler(async (req, res) => {
+  const result = await authService.resumeGuest(req.body.guestKey, getClientMeta(req));
+  setRefreshCookie(res, result.refreshToken);
+  sendSuccess(res, { user: result.user, accessToken: result.accessToken }, 'Guest session resumed');
+});
+
+export const upgradeGuest = asyncHandler(async (req, res) => {
+  const result = await authService.upgradeGuest(req.user.id, req.body);
+  sendSuccess(res, { user: result.user }, 'Account created');
+});
+
 export const refresh = asyncHandler(async (req, res) => {
   const refreshToken = req.cookies[REFRESH_COOKIE];
 
@@ -103,6 +125,9 @@ export const resetPassword = asyncHandler(async (req, res) => {
 export default {
   register,
   login,
+  createGuest,
+  resumeGuest,
+  upgradeGuest,
   refresh,
   logout,
   logoutAll,

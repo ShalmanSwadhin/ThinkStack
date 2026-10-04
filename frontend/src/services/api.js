@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { resumeGuestSession } from './guestSession';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -13,6 +14,13 @@ export const api = axios.create({
 
 let accessToken = null;
 let onSessionRefreshed = null;
+let sessionIsGuest = false;
+
+// Only a session that is already a guest may silently fall back to the stored guest key;
+// an expired account-holder session must never turn into a guest one.
+export const setSessionIsGuest = (value) => {
+  sessionIsGuest = Boolean(value);
+};
 
 export const setAccessToken = (token) => {
   accessToken = token;
@@ -29,6 +37,7 @@ export const resetAuthInterceptor = () => {
   failedQueue.forEach((prom) => prom.reject(new Error('Session ended')));
   failedQueue = [];
   clearAccessToken();
+  sessionIsGuest = false;
 };
 
 export const markExplicitLogout = () => {
@@ -122,7 +131,11 @@ api.interceptors.response.use(
           {},
           { withCredentials: true }
         );
-        const payload = data.data;
+        const payload = data.data?.accessToken
+          ? data.data
+          : sessionIsGuest
+            ? await resumeGuestSession()
+            : data.data;
         if (!payload?.accessToken) {
           clearPersistedSession();
           clearAccessToken();
