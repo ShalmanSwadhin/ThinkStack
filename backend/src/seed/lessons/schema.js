@@ -43,7 +43,9 @@ const MIN_LENGTH = { intro: 40, theory: 150, explain: 100, example: 70, real: 30
 // means filler crept back in.
 const TEMPLATE_FINGERPRINTS = [
   /\{topic\}|\{module\}|\$\{/,
-  /\bundefined\b|\[object Object\]|\bNaN\b/,
+  // "undefined" and "NaN" are legitimate vocabulary in JavaScript lessons, so only a leaked
+  // object stringification is treated as residue.
+  /\[object Object\]/,
   /\bTODO\b|\bFIXME\b/,
   /lorem ipsum/i,
   /ThinkStack Curriculum/i,
