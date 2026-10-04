@@ -682,7 +682,7 @@ Data pipelines are tuned by batching rows into bulk inserts instead of one inser
 **A:** Measure with a timer or profiler on realistic data and compare the time spent waiting on I/O with the time spent computing.
 
 ## summary
-Make fewer and larger I/O operations, rely on buffering, stream large data, and measure before and after any change.
+Good I/O performance comes from making fewer and larger operations, relying on buffering, streaming large data, and measuring before and after any change.
 
 ## codenote
 The Python sample compares the number of write calls made by print and by a single joined write. The JavaScript sample counts calls in the same two styles.
