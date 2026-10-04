@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectAuthInitialized, selectAuthLoading, selectIsAuthenticated } from '../auth/authSlice';
 import { startGuestSession } from './authThunks';
+import { isAutoGuestSuppressed } from '../../services/guestSession';
 
 function Spinner() {
   return (
@@ -22,9 +23,15 @@ export default function ProtectedRoute({ children, roles }) {
   const [guestStartFailed, setGuestStartFailed] = useState(false);
 
   // Visitors without a session continue as a guest instead of being sent to /login.
-  // Role-restricted areas (admin) are never open to guests.
+  // Role-restricted areas (admin) are never open to guests, and an explicit logout must stay
+  // logged out rather than instantly becoming a new guest.
   const needsGuestSession =
-    isInitialized && !isLoading && !isAuthenticated && !roles?.length && !guestStartFailed;
+    isInitialized &&
+    !isLoading &&
+    !isAuthenticated &&
+    !roles?.length &&
+    !guestStartFailed &&
+    !isAutoGuestSuppressed();
 
   useEffect(() => {
     if (!needsGuestSession) return;

@@ -8,7 +8,36 @@ const COOKIE_NAME = 'thinkstack_guest_key';
 const COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
+const NO_AUTO_GUEST_KEY = 'thinkstack-no-auto-guest';
+
 const isValidKey = (value) => typeof value === 'string' && KEY_PATTERN.test(value);
+
+// After an explicit logout, protected pages must not silently turn the visitor back into a
+// guest for the rest of that tab's session. Any new session (login, register, "Continue as
+// Guest") lifts the suppression.
+export function suppressAutoGuest() {
+  try {
+    window.sessionStorage.setItem(NO_AUTO_GUEST_KEY, '1');
+  } catch {
+    // Without sessionStorage the worst case is an automatic guest after logout.
+  }
+}
+
+export function allowAutoGuest() {
+  try {
+    window.sessionStorage.removeItem(NO_AUTO_GUEST_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function isAutoGuestSuppressed() {
+  try {
+    return window.sessionStorage.getItem(NO_AUTO_GUEST_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 function readLocal() {
   try {

@@ -1,7 +1,8 @@
-import { Link } from 'react-router-dom';
-import { useSelector } from 'react-redux';
+import { Link, useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { motion } from 'framer-motion';
 import { selectCurrentUser, selectIsAuthenticated } from '../features/auth/authSlice';
+import { startGuestSession } from '../features/auth/authThunks';
 import Button from '../components/ui/Button';
 import Card, { CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 
@@ -44,9 +45,23 @@ const fadeUp = {
 };
 
 export default function LandingPage() {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
   const isAuthenticated = useSelector(selectIsAuthenticated);
   const isGuest = useSelector(selectCurrentUser)?.isGuest;
   const continueLabel = isAuthenticated && !isGuest ? 'View Dashboard' : isGuest ? 'Continue Learning' : 'Continue as Guest';
+
+  const handleContinue = async () => {
+    if (!isAuthenticated) {
+      try {
+        await dispatch(startGuestSession()).unwrap();
+      } catch {
+        navigate('/login');
+        return;
+      }
+    }
+    navigate('/dashboard');
+  };
 
   return (
     <div>
@@ -70,11 +85,9 @@ export default function LandingPage() {
               <Link to="/register">
                 <Button size="lg">Start Learning Free</Button>
               </Link>
-              <Link to="/dashboard">
-                <Button variant="secondary" size="lg">
-                  {continueLabel}
-                </Button>
-              </Link>
+              <Button variant="secondary" size="lg" onClick={handleContinue}>
+                {continueLabel}
+              </Button>
             </div>
           </motion.div>
         </div>

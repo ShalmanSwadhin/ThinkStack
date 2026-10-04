@@ -1,4 +1,5 @@
 import api, { setAccessToken, setSessionIsGuest, markPersistedSession } from '../../services/api';
+import { allowAutoGuest } from '../../services/guestSession';
 
 const extractError = (error) => {
   const message = error.response?.data?.error?.message || error.message || 'Something went wrong';
@@ -52,6 +53,7 @@ export const applyAuthSession = (data) => {
     setAccessToken(data.accessToken);
     setSessionIsGuest(data.user?.isGuest);
     markPersistedSession();
+    allowAutoGuest();
   }
   return data;
 };

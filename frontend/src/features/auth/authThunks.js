@@ -8,7 +8,12 @@ import {
   clearPersistedSession,
   setSessionIsGuest,
 } from '../../services/api';
-import { clearGuestKey, createGuestSession, resumeGuestSession } from '../../services/guestSession';
+import {
+  clearGuestKey,
+  createGuestSession,
+  resumeGuestSession,
+  suppressAutoGuest,
+} from '../../services/guestSession';
 
 let guestStartInFlight = null;
 
@@ -102,6 +107,7 @@ export const refreshSession = createAsyncThunk(
 
 export const logoutUser = createAsyncThunk('auth/logout', async (_, { dispatch }) => {
   markExplicitLogout();
+  suppressAutoGuest();
   clearPersistedSession();
   resetAuthInterceptor();
   try {
