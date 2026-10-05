@@ -720,7 +720,7 @@ Rate limiters and traffic analysers check bursts over variable periods, text edi
 
 ## pros
 - Linear time for many subarray problems
-- Constant memory for sums and counts
+- Only a few variables are needed for sums and counters
 - A reusable template with a clear invariant
 
 ## cons
