@@ -385,7 +385,7 @@ Radix sort sorts large arrays of integers and fixed-length keys in databases and
 
 ## pros
 - Linear time for fixed-width keys
-- Stable
+- Stable, so ties keep their input order
 - Very fast on large arrays of integers
 
 ## cons
@@ -530,7 +530,7 @@ Note that stability concerns elements that compare equal under the sort key but 
 Four records `("Bob", "B")`, `("Amy", "A")`, `("Cat", "A")` and `("Dan", "B")` sorted by department with Python's stable `sorted` give Amy, Cat, Bob, Dan: within each department the original order is preserved. A quick sort in the Lomuto style applied to `[(2, a), (2, b), (1, c), (2, d)]` by the number returns `[(1, c), (2, d), (2, b), (2, a)]`, so the three records with key 2 changed order. The JavaScript sample sorts employees by name and then stably by department, giving each department's members in name order.
 
 ## real
-Spreadsheets and data grids that sort by clicking column headers rely on stable sorting to keep earlier sorts as tiebreakers, and the standardisation of stable `Array.prototype.sort` in 2019 removed a cross-browser inconsistency.
+Spreadsheets and data grids that sort by clicking column headers rely on stable sorting to keep earlier sorts as tiebreakers, and the 2019 standardisation of a stable array sort in JavaScript removed a cross-browser inconsistency.
 
 ## pros
 - Preserves meaningful order among ties
@@ -990,7 +990,7 @@ Practical uses: database engines, the Unix `sort` command (which spills to tempo
 The Python program splits nine numbers into three runs of three, sorts each to get `[[4, 7, 9], [1, 2, 8], [3, 5, 6]]` and merges them with `heapq.merge` into `[1, 2, 3, 4, 5, 6, 7, 8, 9]`. The pass formula gives 4 passes for 1,000 blocks with 10 buffers: one pass to create 100 runs and three merge passes with fan-in 9. The JavaScript program performs the same k-way merge by repeatedly taking the smallest front element among the runs.
 
 ## real
-The Unix `sort` command, database ORDER BY on large tables, indexing in search engines and sorting steps of distributed frameworks all use external merge sort or its parallel variants.
+The Unix sort command, database ordering of large tables, indexing in search engines and sorting steps of distributed frameworks all use external merge sort or its parallel variants.
 
 ## pros
 - Handles data far larger than memory
