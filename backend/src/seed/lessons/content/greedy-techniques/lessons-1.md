@@ -486,7 +486,7 @@ Output:
    - [ ] When it is shorter
    - [ ] When it has the same start
    > Touching endpoints are allowed.
-3. What is the time complexity?
+3. How fast is earliest-finish activity selection overall?
    - [ ] O(n)
    - [x] O(n log n)
    - [ ] O(n squared)

@@ -326,7 +326,7 @@ Output:
    - [ ] Sorting is optional
    - [ ] Trains are identical
    > Present trains equal arrivals so far minus departures so far.
-3. What is the time complexity?
+3. How much time does the platform sweep need for n trains?
    - [ ] O(1)
    - [x] O(n log n)
    - [ ] O(n squared)
