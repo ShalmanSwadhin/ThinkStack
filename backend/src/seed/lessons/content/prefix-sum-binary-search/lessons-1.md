@@ -352,7 +352,7 @@ Monitoring systems look for windows where positive and negative events cancel, f
 
 ## uses
 - Longest balanced binary subarray
-- Counting subarrays with sums divisible by k
+- Counting blocks whose total is a multiple of a given number
 - Finding the longest subarray with a target sum
 - Zero-XOR and balanced-character substring problems
 
