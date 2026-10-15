@@ -3,13 +3,6 @@ import { getAuthoredLesson } from '../lessons/index.js';
 import { lessonToContent, lessonToQuiz, estimateMinutes, lessonDescription } from '../lessons/build.js';
 import { buildScaffoldContent, buildScaffoldQuiz } from '../lessons/scaffold.js';
 
-// TRANSITIONAL: lessons not yet hand-written still use the old template pipeline. Removed
-// once all 500 lessons have authored content (lessonContent.test.js enforces completeness).
-import { buildLessonMetadata } from '../generators/contentBuilder.js';
-import { buildRichLessonContent } from '../generators/lessonContentLibrary.js';
-import { buildTopicCodeExamples } from '../generators/topicCodeLibrary.js';
-import { buildQuizQuestionsForLesson } from '../generators/quizBuilder.js';
-
 function toSlug(text) {
   return text
     .toLowerCase()
@@ -19,7 +12,8 @@ function toSlug(text) {
 
 /**
  * Flatten modules into lesson definitions (slug, ordering, category, tags …).
- * `authored` is the hand-written lesson or null.
+ * Every curriculum lesson must have hand-written content; a missing one is a build error
+ * (lessonContent.test.js enforces the same in CI).
  */
 export function buildLessonCatalog() {
   const lessons = [];
@@ -28,7 +22,7 @@ export function buildLessonCatalog() {
   for (const module of MODULES) {
     module.lessons.forEach((lessonTitle, lessonIndex) => {
       const authored = getAuthoredLesson(module.id, lessonTitle);
-      const legacy = authored ? null : buildLessonMetadata(module, lessonTitle, lessonIndex, globalOrder);
+      if (!authored) throw new Error(`No authored lesson content for "${module.id}" › "${lessonTitle}"`);
 
       lessons.push({
         slug: `${module.id}-${toSlug(lessonTitle)}`,
@@ -41,10 +35,9 @@ export function buildLessonCatalog() {
         moduleOrder: lessonIndex + 1,
         tags: [module.id, toSlug(lessonTitle), module.category, `lesson-${lessonIndex + 1}`],
         // A visualizer is attached only when a lesson genuinely demonstrates one.
-        visualizerId: authored ? authored.viz ?? null : module.visualizerId,
-        practice: authored?.practice ?? [],
+        visualizerId: authored.viz ?? null,
+        practice: authored.practice ?? [],
         authored,
-        legacy,
       });
       globalOrder += 1;
     });
@@ -56,31 +49,10 @@ export function buildLessonCatalog() {
 /** Build TOPICS array for the seed bootstrap. */
 export function buildTopics() {
   return buildLessonCatalog().map((lesson) => {
-    let content;
-    let quiz;
-    let description;
-    let estimatedMinutes;
-
-    if (lesson.authored) {
-      content = lessonToContent(lesson.authored);
-      quiz = lessonToQuiz(lesson.authored, lesson.slug);
-      description = lessonDescription(lesson.authored);
-      estimatedMinutes = estimateMinutes(lesson.authored);
-    } else {
-      content = buildRichLessonContent(lesson.legacy);
-      content.codeExamples = buildTopicCodeExamples(lesson.legacy);
-      quiz = buildQuizQuestionsForLesson({
-        title: lesson.title,
-        moduleTitle: lesson.moduleId,
-        slug: lesson.slug,
-        order: lesson.order,
-        complexity: { time: content.timeComplexity, space: content.spaceComplexity },
-        applications: content.applications ?? [],
-        pitfalls: content.commonMistakes ?? [],
-      });
-      description = lesson.legacy.description;
-      estimatedMinutes = lesson.legacy.estimatedMinutes;
-    }
+    const content = lessonToContent(lesson.authored);
+    const quiz = lessonToQuiz(lesson.authored, lesson.slug);
+    const description = lessonDescription(lesson.authored);
+    const estimatedMinutes = estimateMinutes(lesson.authored);
 
     return {
       slug: lesson.slug,
@@ -120,12 +92,6 @@ function findLessonByTitle(title) {
 export function buildTopicContent(title) {
   const found = findLessonByTitle(title);
   if (found?.lesson) return lessonToContent(found.lesson);
-  if (found) {
-    const catalogEntry = buildLessonCatalog().find((l) => l.title === title);
-    const content = buildRichLessonContent(catalogEntry.legacy);
-    content.codeExamples = buildTopicCodeExamples(catalogEntry.legacy);
-    return content;
-  }
   return buildScaffoldContent(title);
 }
 
@@ -133,10 +99,6 @@ export function buildTopicContent(title) {
 export function buildQuizForTitle(title) {
   const found = findLessonByTitle(title);
   if (found?.lesson) return lessonToQuiz(found.lesson, `${found.module.id}-${toSlug(title)}`);
-  if (found) {
-    const topic = TOPICS.find((t) => t.title === title);
-    if (topic) return topic.quiz;
-  }
   return buildScaffoldQuiz(title);
 }
 

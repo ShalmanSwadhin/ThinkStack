@@ -429,7 +429,6 @@ true
 kind: algorithm
 time: O(P + K) to list K completions of a prefix of length P (walk the prefix in O(P) and traverse the subtree in time proportional to its size); counting completions is O(P) with stored counts.
 space: O(total characters) for the trie, plus O(L) recursion for collecting suffixes.
-practice: trie-level-order-traversal
 
 ## intro
 Prefix queries are what tries do best: which words start with these letters, how many do, what is the longest prefix shared by a set of words, which stored string is the longest match for an address. Autocomplete boxes, IP routers and spell checkers are all built from a few such operations over a trie.

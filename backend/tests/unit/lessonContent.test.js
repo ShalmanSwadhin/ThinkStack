@@ -103,6 +103,24 @@ describe('authored lessons are structurally complete', () => {
     expect(validateLesson(lesson, label)).toEqual([]);
   });
 
+  it('has hand-written content for every lesson in the curriculum', () => {
+    const missing = [];
+    for (const module of MODULES) {
+      for (const title of module.lessons) if (!byModule[module.id]?.[title]) missing.push(`${module.id} › ${title}`);
+    }
+    expect(missing).toEqual([]);
+    expect(entries).toHaveLength(MODULES.reduce((sum, m) => sum + m.lessons.length, 0));
+  });
+
+  it('builds a complete topic, with a four-question quiz, for each lesson without any template fallback', async () => {
+    const { buildTopics } = await import('../../src/seed/curriculum/index.js');
+    const topics = buildTopics();
+    expect(topics).toHaveLength(entries.length);
+    expect(new Set(topics.map((t) => t.slug)).size).toBe(topics.length);
+    const bad = topics.filter((t) => t.quiz.length !== 4 || !t.content.codeExamples.length || t.content.interviewQuestions.length !== 3);
+    expect(bad.map((t) => t.slug)).toEqual([]);
+  });
+
   it('does not contain lessons that are not in the curriculum', () => {
     const known = new Set(MODULES.flatMap((m) => m.lessons.map((t) => `${m.id}::${t}`)));
     const stray = [];
