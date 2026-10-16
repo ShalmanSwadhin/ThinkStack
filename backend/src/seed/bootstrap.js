@@ -18,6 +18,7 @@ import { CERTIFICATES } from './data/certificates.js';
 import { CONTESTS } from './data/contests.js';
 import { buildVisualizerSeedData } from './data/visualizers.js';
 import retireLegacyProblems from './retireLegacyProblems.js';
+import { PROBLEM_FIELDS, QUIZ_FIELDS, TOPIC_FIELDS, isEditedSinceSeed, stampSeedHash } from './seedGuard.js';
 import ensureAdmin from './ensureAdmin.js';
 import ensureDemoUser from './ensureDemoUser.js';
 import { DIFFICULTY } from 'shared/constants';
@@ -34,6 +35,25 @@ const CONTEST_DIFFICULTY_MAP = {
 
 function buildUpdate(mode, document) {
   return mode === 'sync' ? { $set: document } : { $setOnInsert: document };
+}
+
+/**
+ * Find seed-managed records that were edited (e.g. in the admin panel) after the seed last wrote
+ * them, so a sync can leave them alone. See seedGuard.js. A forced run protects nothing.
+ */
+async function detectEditedRecords(force) {
+  const edited = { topics: new Set(), quizzes: new Set(), problems: new Set() };
+  if (force) return edited;
+
+  const [topics, quizzes, problems] = await Promise.all([
+    Topic.find({}).select(`+seedHash slug ${TOPIC_FIELDS.join(' ')}`).lean(),
+    Quiz.find({}).select(`+seedHash topicId ${QUIZ_FIELDS.join(' ')}`).lean(),
+    Problem.find({}).select(`+seedHash slug ${PROBLEM_FIELDS.join(' ')}`).lean(),
+  ]);
+  for (const topic of topics) if (isEditedSinceSeed(topic, TOPIC_FIELDS)) edited.topics.add(topic.slug);
+  for (const quiz of quizzes) if (isEditedSinceSeed(quiz, QUIZ_FIELDS)) edited.quizzes.add(String(quiz.topicId));
+  for (const problem of problems) if (isEditedSinceSeed(problem, PROBLEM_FIELDS)) edited.problems.add(problem.slug);
+  return edited;
 }
 
 async function ensureBadges(mode, stats) {
@@ -93,7 +113,7 @@ async function ensureVisualizers(mode, stats) {
   }
 }
 
-async function ensureTopicsAndQuizzes(adminId, mode, stats) {
+async function ensureTopicsAndQuizzes(adminId, mode, stats, edited) {
   const topicMap = new Map();
   const TOPICS = buildTopics();
   let totalQuestions = 0;
@@ -117,13 +137,18 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
       },
     };
 
-    const topic = await Topic.findOneAndUpdate(
-      { slug: topicData.slug },
-      buildUpdate(mode, topicDocument),
-      { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
-    );
+    // A lesson edited in the admin panel since the last seed is not overwritten by a sync.
+    const topicEdited = Boolean(existingTopic) && edited.topics.has(topicData.slug);
+    const topic = topicEdited
+      ? await Topic.findOne({ slug: topicData.slug })
+      : await Topic.findOneAndUpdate(
+          { slug: topicData.slug },
+          buildUpdate(mode, topicDocument),
+          { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
+        );
 
     if (!existingTopic) stats.topics.created += 1;
+    else if (topicEdited) stats.topics.protected += 1;
     else if (mode === 'sync') stats.topics.updated += 1;
     else stats.topics.existing += 1;
 
@@ -145,6 +170,8 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
     if (!quiz) {
       quiz = await Quiz.create(quizDocument);
       stats.quizzes.created += 1;
+    } else if (edited.quizzes.has(String(topic._id))) {
+      stats.quizzes.protected += 1;
     } else if (mode === 'sync') {
       quiz = await Quiz.findOneAndUpdate({ topicId: topic._id }, { $set: quizDocument }, { new: true });
       stats.quizzes.updated += 1;
@@ -163,12 +190,12 @@ async function ensureTopicsAndQuizzes(adminId, mode, stats) {
   return { topicMap, orderedTopics: TOPICS.map((t) => t.slug) };
 }
 
-async function wireTopicNavigation(topicMap, orderedSlugs, mode) {
+async function wireTopicNavigation(topicMap, orderedSlugs, edited) {
   const ids = orderedSlugs.map((slug) => topicMap.get(slug)?._id).filter(Boolean);
 
   for (let i = 0; i < ids.length; i++) {
     const topic = topicMap.get(orderedSlugs[i]);
-    if (!topic) continue;
+    if (!topic || edited.topics.has(orderedSlugs[i])) continue;
 
     const navigation = {
       previousLesson: i > 0 ? ids[i - 1] : undefined,
@@ -188,7 +215,7 @@ async function wireTopicNavigation(topicMap, orderedSlugs, mode) {
   }
 }
 
-async function ensureProblems(adminId, topicMap, mode, stats) {
+async function ensureProblems(adminId, topicMap, mode, stats, edited) {
   const problemIdsByTopic = new Map();
 
   for (const problemData of PROBLEMS) {
@@ -199,6 +226,9 @@ async function ensureProblems(adminId, topicMap, mode, stats) {
     if (!existing) {
       problem = await Problem.create(problemDocument);
       stats.problems.created += 1;
+    } else if (edited.problems.has(problemData.slug)) {
+      problem = await Problem.findById(existing._id);
+      stats.problems.protected += 1;
     } else if (mode === 'sync') {
       problem = await Problem.findOneAndUpdate(
         { slug: problemData.slug },
@@ -209,6 +239,10 @@ async function ensureProblems(adminId, topicMap, mode, stats) {
     } else {
       problem = await Problem.findById(existing._id);
       stats.problems.existing += 1;
+    }
+
+    if (!edited.problems.has(problemData.slug) && (!existing || mode === 'sync')) {
+      await stampSeedHash(Problem, problem._id, PROBLEM_FIELDS);
     }
 
     for (const topicSlug of problemData.topicSlugs || []) {
@@ -222,6 +256,7 @@ async function ensureProblems(adminId, topicMap, mode, stats) {
   stats.problems.legacy = await retireLegacyProblems();
 
   for (const [slug, topic] of topicMap) {
+    if (edited.topics.has(slug)) continue;
     const topicDoc = await Topic.findById(topic._id).select('relatedProblems').lean();
     const hasRelated = Array.isArray(topicDoc?.relatedProblems) && topicDoc.relatedProblems.length > 0;
     if (hasRelated && mode !== 'sync') continue;
@@ -374,10 +409,10 @@ function createStats() {
     badges: { upserted: 0, existing: 0, updated: 0 },
     certificates: { created: 0, existing: 0, updated: 0 },
     visualizers: { created: 0, existing: 0, updated: 0 },
-    topics: { created: 0, existing: 0, updated: 0 },
-    quizzes: { created: 0, existing: 0, updated: 0 },
+    topics: { created: 0, existing: 0, updated: 0, protected: 0 },
+    quizzes: { created: 0, existing: 0, updated: 0, protected: 0 },
     quizQuestions: 0,
-    problems: { created: 0, existing: 0, updated: 0 },
+    problems: { created: 0, existing: 0, updated: 0, protected: 0 },
     dailyChallenges: { created: 0, existing: 0, updated: 0 },
     contests: { created: 0, existing: 0, updated: 0 },
     announcements: { created: 0, existing: 0, updated: 0 },
@@ -405,9 +440,19 @@ export async function bootstrapDatabase(options = {}) {
     await ensureVisualizers(mode, stats);
   }
 
-  const { topicMap, orderedTopics } = await ensureTopicsAndQuizzes(admin._id, mode, stats);
-  await wireTopicNavigation(topicMap, orderedTopics, mode);
-  await ensureProblems(admin._id, topicMap, mode, stats);
+  const edited = await detectEditedRecords(Boolean(options.force));
+  const { topicMap, orderedTopics } = await ensureTopicsAndQuizzes(admin._id, mode, stats, edited);
+  await wireTopicNavigation(topicMap, orderedTopics, edited);
+  await ensureProblems(admin._id, topicMap, mode, stats, edited);
+
+  // Fingerprint everything the seed wrote (after links and navigation are final) so a later sync
+  // can tell seed output from admin edits.
+  for (const [slug, topic] of topicMap) {
+    if (edited.topics.has(slug)) continue;
+    await stampSeedHash(Topic, topic._id, TOPIC_FIELDS);
+    const quiz = await Quiz.findOne({ topicId: topic._id }).select('_id').lean();
+    if (quiz && !edited.quizzes.has(String(topic._id))) await stampSeedHash(Quiz, quiz._id, QUIZ_FIELDS);
+  }
 
   if (!lessonsOnly) {
     await ensureContests(admin._id, mode, stats);

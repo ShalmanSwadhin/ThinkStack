@@ -29,7 +29,9 @@ async function clearDatabase() {
  * Manual seed entry point.
  *
  * - default: idempotent insert-only bootstrap (same as server startup)
- * - --sync: overwrite seed-managed records from source data
+ * - --sync: overwrite seed-managed records from source data; lessons, quizzes and problems that
+ *   were edited (e.g. in the admin panel) since the last seed are left alone and reported
+ * - --force: with --sync, overwrite those edited records too
  * - --fresh: wipe seed collections first, then insert defaults
  * - --lessons: with --sync, refresh only lessons, their quizzes and problem links
  */
@@ -43,13 +45,19 @@ export async function runSeed(options = {}) {
     await clearDatabase();
   }
 
-  const stats = await bootstrapDatabase({ mode, only: options.lessonsOnly ? 'lessons' : undefined });
+  const stats = await bootstrapDatabase({ mode, only: options.lessonsOnly ? 'lessons' : undefined, force: Boolean(options.force) });
 
   const summary = {
     mode,
     fresh,
     admin: stats.admin,
     ...stats.totals,
+    protectedFromOverwrite: {
+      topics: stats.topics.protected,
+      quizzes: stats.quizzes.protected,
+      problems: stats.problems.protected,
+    },
+    legacyProblems: stats.problems.legacy,
   };
 
   logger.info('Seed completed successfully', summary);
@@ -62,8 +70,9 @@ if (isDirectRun) {
   const fresh = process.argv.includes('--fresh');
   const sync = process.argv.includes('--sync');
   const lessonsOnly = process.argv.includes('--lessons');
+  const force = process.argv.includes('--force');
 
-  runSeed({ fresh, sync, lessonsOnly })
+  runSeed({ fresh, sync, lessonsOnly, force })
     .then((summary) => {
       console.log('\n✅ Seed Summary:', JSON.stringify(summary, null, 2));
       process.exit(0);
