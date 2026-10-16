@@ -78,6 +78,8 @@ const problemSchema = new mongoose.Schema(
     },
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'draft' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Fingerprint written by the seed (see seed/seedGuard.js); never exposed through the API.
+    seedHash: { type: String, select: false },
   },
   { timestamps: true }
 );

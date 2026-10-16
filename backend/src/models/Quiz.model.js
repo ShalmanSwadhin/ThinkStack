@@ -34,6 +34,8 @@ const quizSchema = new mongoose.Schema(
     },
     visibility: { type: String, enum: ['public', 'private', 'unlisted'], default: 'public' },
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'draft' },
+    // Fingerprint written by the seed (see seed/seedGuard.js); never exposed through the API.
+    seedHash: { type: String, select: false },
   },
   { timestamps: true }
 );

@@ -36,7 +36,12 @@ const formatQuizBookmark = (bookmark, quiz) => ({
   createdAt: bookmark.createdAt,
 });
 
-const resolveTarget = async (targetType, { targetId, targetSlug }) => {
+/**
+ * Resolve what a bookmark points at. Adding requires a published target; REMOVING must not,
+ * otherwise a bookmark whose lesson or problem was archived or unpublished later could never be
+ * removed by its target (only by its own id).
+ */
+const resolveTarget = async (targetType, { targetId, targetSlug }, { requirePublished = true } = {}) => {
   if (!BOOKMARK_TYPES.includes(targetType)) {
     throw new AppError('Invalid bookmark type', 400);
   }
@@ -45,6 +50,8 @@ const resolveTarget = async (targetType, { targetId, targetSlug }) => {
     if (!mongoose.Types.ObjectId.isValid(targetId)) {
       throw new AppError('Invalid target ID', 400);
     }
+
+    if (!requirePublished) return { targetId: new mongoose.Types.ObjectId(targetId), entity: null };
 
     if (targetType === 'topic') {
       const topic = await topicRepository.findById(targetId);
@@ -65,14 +72,16 @@ const resolveTarget = async (targetType, { targetId, targetSlug }) => {
 
   if (targetSlug) {
     if (targetType === 'topic') {
-      const topic = await topicRepository.findPublishedBySlug(targetSlug);
+      const topic = requirePublished
+        ? await topicRepository.findPublishedBySlug(targetSlug)
+        : await topicRepository.findOne({ slug: String(targetSlug).toLowerCase() });
       if (!topic) throw new AppError('Topic not found', 404);
       return { targetId: topic._id, entity: topic };
     }
 
     if (targetType === 'problem') {
       const problem = await problemRepository.findBySlug(targetSlug);
-      if (!problem || problem.status !== 'published') throw new AppError('Problem not found', 404);
+      if (!problem || (requirePublished && problem.status !== 'published')) throw new AppError('Problem not found', 404);
       return { targetId: problem._id, entity: problem };
     }
 
@@ -96,13 +105,15 @@ export class BookmarksService {
 
     const bookmarks = await Promise.all(
       data.map(async (bookmark) => {
+        // A bookmark whose target is no longer published would link to a page that 404s, so it
+        // is left out of the list (the record itself is kept and can still be removed).
         if (bookmark.targetType === 'topic') {
           const topic = await topicRepository.findById(bookmark.targetId);
-          return topic ? formatTopicBookmark(bookmark, topic) : null;
+          return topic && topic.status === 'published' ? formatTopicBookmark(bookmark, topic) : null;
         }
         if (bookmark.targetType === 'problem') {
           const problem = await problemRepository.findById(bookmark.targetId);
-          return problem ? formatProblemBookmark(bookmark, problem) : null;
+          return problem && problem.status === 'published' ? formatProblemBookmark(bookmark, problem) : null;
         }
         const quiz = await quizRepository.findPublishedById(bookmark.targetId, {
           populate: 'topicId',
@@ -158,7 +169,7 @@ export class BookmarksService {
       return { success: true };
     }
 
-    const resolved = await resolveTarget(targetType, { targetId, targetSlug });
+    const resolved = await resolveTarget(targetType, { targetId, targetSlug }, { requirePublished: false });
     const deleted = await bookmarkRepository.deleteByUserAndTarget(
       userId,
       targetType,

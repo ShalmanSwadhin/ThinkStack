@@ -7,6 +7,7 @@ import ComingSoonError from '../utils/ComingSoonError.js';
 import {
   COMING_SOON_MESSAGES,
   isJudge0ComingSoon,
+  isJudge0Configured,
   shouldUseJudge0Mock,
   warnJudge0NotConfigured,
 } from '../utils/integrationStatus.js';
@@ -47,6 +48,9 @@ const buildHeaders = () => {
   if (env.judge0.apiKey) {
     headers['X-RapidAPI-Key'] = env.judge0.apiKey;
     headers['X-RapidAPI-Host'] = env.judge0.apiHost;
+  }
+  if (env.judge0.authToken) {
+    headers['X-Auth-Token'] = env.judge0.authToken;
   }
   return headers;
 };
@@ -157,7 +161,7 @@ const pollSubmission = async (token) => {
 
 export class Judge0Service {
   isConfigured() {
-    return Boolean(env.judge0.apiKey?.trim());
+    return isJudge0Configured();
   }
 
   isComingSoon() {

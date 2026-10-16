@@ -22,6 +22,8 @@ const env = {
     apiUrl: process.env.JUDGE0_API_URL || '',
     apiKey: process.env.JUDGE0_API_KEY || '',
     apiHost: process.env.JUDGE0_API_HOST || 'judge0-ce.p.rapidapi.com',
+    // Optional X-Auth-Token for a self-hosted Judge0 that has authentication enabled.
+    authToken: process.env.JUDGE0_AUTH_TOKEN || '',
     mock: process.env.JUDGE0_MOCK === 'true',
   },
   gemini: {

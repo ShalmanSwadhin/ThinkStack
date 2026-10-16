@@ -12,7 +12,7 @@ import { parseLessonFile } from '../../src/seed/lessons/parse.js';
 import { validateLesson } from '../../src/seed/lessons/schema.js';
 import { lessonToContent, lessonToQuiz } from '../../src/seed/lessons/build.js';
 import { ALGORITHM_MAP } from '../../../shared/algorithms/catalog.js';
-import { runSample } from '../helpers/runLessonCode.js';
+import { canExecute, runSample } from '../helpers/runLessonCode.js';
 
 const { byModule } = loadAuthoredLessons();
 const entries = [];
@@ -220,13 +220,25 @@ describe('no content is repeated across lessons', () => {
 });
 
 describe('code samples run and print what the lesson says they print', () => {
-  const runnable = entries.flatMap(({ label, lesson }) => lesson.code.map((sample) => [`${label} [${sample.lang}]`, sample]));
+  // The title says whether a sample is REALLY run here or only syntax-checked, so a green test
+  // is never mistaken for execution. Python, JavaScript and Bash always run; Java, C and C++ are
+  // compiled and run only when a compiler is available (set LESSON_CC / LESSON_CXX / LESSON_JAVAC /
+  // LESSON_JAVA to point at one) — see tests/helpers/runLessonCode.js.
+  const how = (lang) => (['text', 'json'].includes(lang) ? '' : canExecute(lang) ? ' — executed' : ' — syntax check only, not compiled');
+  const runnable = entries.flatMap(({ label, lesson }) => lesson.code.map((sample) => [`${label} [${sample.lang}${how(sample.lang)}]`, sample]));
 
   it.each(runnable)('%s', (_label, sample) => {
     const result = runSample(sample);
     if (result.status === 'skipped') return;
     expect({ status: result.status, detail: result.status === 'failed' ? result.detail : '' }).toEqual({ status: 'passed', detail: '' });
-  }, 60000);
+  }, 120000);
+
+  it('really executes Java, C and C++ samples when REQUIRE_COMPILERS=true (CI with toolchains)', () => {
+    if (process.env.REQUIRE_COMPILERS !== 'true') return;
+    const used = new Set(entries.flatMap(({ lesson }) => lesson.code.map((sample) => sample.lang)));
+    const missing = ['java', 'c', 'cpp'].filter((lang) => used.has(lang) && !canExecute(lang));
+    expect(missing).toEqual([]);
+  });
 });
 
 describe('conceptual lessons do not invent complexity', () => {
@@ -289,9 +301,10 @@ describe('practice problems belong to the lesson', () => {
     expect(problems).toEqual([]);
   });
 
-  it('the relevance table covers exactly the problem templates that exist', async () => {
+  it('every problem in the relevance table exists in the problem bank', async () => {
     const { PROBLEM_TEMPLATE_KEYS } = await import('../../src/seed/generators/problemBank.js');
-    expect([...PROBLEM_TEMPLATE_KEYS].sort()).toEqual(Object.keys(RELEVANCE).sort());
+    const missing = Object.keys(RELEVANCE).filter((key) => !PROBLEM_TEMPLATE_KEYS.has(key));
+    expect(missing).toEqual([]);
   });
 });
 

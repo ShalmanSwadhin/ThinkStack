@@ -39,7 +39,7 @@ export const SEARCHING = {
     rule(/check second third/i, /\[mid2\]\s*={2,3}\s*target/),
     rule(/not found/i, RETURN_NOT_FOUND, 'last'),
     rule(/found at index/i, /\breturn\s+mid[12]\b/, 'first'),
-    rule(/first third/i, /\bhigh\b[^=]*=\s*mid1\s*-\s*1/),
+    rule(/^target is in the first third/i, /\bhigh\b[^=]*=\s*mid1\s*-\s*1/),
     rule(/third third/i, /\blow\b[^=]*=\s*mid2\s*\+\s*1/),
     rule(/middle third/i, /\blow\b[^=]*=\s*mid1\s*\+\s*1/),
   ],

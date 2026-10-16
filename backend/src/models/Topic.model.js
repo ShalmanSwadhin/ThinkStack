@@ -98,6 +98,8 @@ const topicSchema = new mongoose.Schema(
     tags: [{ type: String, trim: true, lowercase: true }],
     searchText: { type: String },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Fingerprint written by the seed (see seed/seedGuard.js); never exposed through the API.
+    seedHash: { type: String, select: false },
   },
   { timestamps: true }
 );

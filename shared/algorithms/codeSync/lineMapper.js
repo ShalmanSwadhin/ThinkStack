@@ -14,6 +14,7 @@
 import { getAlgorithmCode } from './templates.js';
 import { getAnalysis } from './sourceAnalysis.js';
 import { EVENT_MAP } from './eventMap/index.js';
+import { finalStatementLine } from './finalStatement.js';
 
 export { EVENT_MAP };
 
@@ -34,7 +35,12 @@ export function resolveRule(rule, analysis, language) {
 
   for (const candidate of candidates) {
     if (candidate === '@first') return { line: codeLines[0]?.number ?? null, hits: codeLines.slice(0, 1) };
-    if (candidate === '@last') return { line: codeLines.at(-1)?.number ?? null, hits: codeLines.slice(-1) };
+    // '@last' = where the algorithm ends: the outermost statement of the last function body, not
+    // whatever statement happens to sit last in the file inside nested loops (see finalStatement.js).
+    if (candidate === '@last') {
+      const line = finalStatementLine(codeLines);
+      return { line, hits: codeLines.filter((entry) => entry.number === line) };
+    }
     const hits = codeLines.filter((line) => candidate.test(line.code));
     if (hits.length) return { line: pickHit(hits, rule.nth)?.number ?? null, hits };
   }

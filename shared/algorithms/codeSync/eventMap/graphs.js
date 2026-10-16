@@ -141,7 +141,8 @@ export const GRAPHS = {
 
   'scc-kosaraju': [
     rule(/pass \d+: dfs on the original/i, [call('dfs1'), /\bdfs\s*\(/], 'first'),
-    rule(/visit .* \(pass 1|finish /i, [call('dfs1'), /\bdfs\s*\(/], 'first'),
+    // "Finish E. Finish order: …" — anchored so "…in reverse finish order." (pass 2) is not caught here.
+    rule(/visit .* \(pass 1|^finish /i, [call('dfs1'), /\bdfs\s*\(/], 'first'),
     rule(/pass \d+: dfs on the transpose/i, [/\btransposed\s*=|\breverse_?edges\s*\(/i, /\bwhile\b/], 'first'),
     rule(/visit .* \(pass 2|component \d+:/i, [call('dfs2'), /\bcomponents?\s*\.\s*(?:append|add|push)/i], 'first'),
     rule(/strongly connected components:/i, [RETURN, '@last'], 'last'),

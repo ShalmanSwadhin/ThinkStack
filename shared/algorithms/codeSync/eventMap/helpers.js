@@ -7,7 +7,9 @@
  * Anchors are matched against comment-stripped executable lines only. An array is
  * tried in order (first regex with any hit wins), which lets one rule cover languages
  * that spell the same statement differently (e.g. a tuple swap vs a temp-variable swap).
- * The special anchors '@first' and '@last' mean the first / last executable line.
+ * The special anchors '@first' and '@last' mean the first executable line and the place the
+ * algorithm ends: the outermost statement of the last function body (the outer loop of a void
+ * function), see ../finalStatement.js.
  */
 
 /** `return -1` (not-found result). */
