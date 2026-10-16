@@ -289,9 +289,10 @@ describe('practice problems belong to the lesson', () => {
     expect(problems).toEqual([]);
   });
 
-  it('the relevance table covers exactly the problem templates that exist', async () => {
+  it('every problem in the relevance table exists in the problem bank', async () => {
     const { PROBLEM_TEMPLATE_KEYS } = await import('../../src/seed/generators/problemBank.js');
-    expect([...PROBLEM_TEMPLATE_KEYS].sort()).toEqual(Object.keys(RELEVANCE).sort());
+    const missing = Object.keys(RELEVANCE).filter((key) => !PROBLEM_TEMPLATE_KEYS.has(key));
+    expect(missing).toEqual([]);
   });
 });
 

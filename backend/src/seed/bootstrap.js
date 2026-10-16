@@ -17,6 +17,7 @@ import { BADGES } from './data/badges.js';
 import { CERTIFICATES } from './data/certificates.js';
 import { CONTESTS } from './data/contests.js';
 import { buildVisualizerSeedData } from './data/visualizers.js';
+import retireLegacyProblems from './retireLegacyProblems.js';
 import ensureAdmin from './ensureAdmin.js';
 import ensureDemoUser from './ensureDemoUser.js';
 import { DIFFICULTY } from 'shared/constants';
@@ -216,6 +217,10 @@ async function ensureProblems(adminId, topicMap, mode, stats) {
     }
   }
 
+  // Move everything that pointed at the retired numbered problems over to the real ones
+  // (archives, never deletes) before lessons are linked.
+  stats.problems.legacy = await retireLegacyProblems();
+
   for (const [slug, topic] of topicMap) {
     const topicDoc = await Topic.findById(topic._id).select('relatedProblems').lean();
     const hasRelated = Array.isArray(topicDoc?.relatedProblems) && topicDoc.relatedProblems.length > 0;
@@ -285,7 +290,9 @@ function pickProblemsForContest(allProblems, contestData, index) {
 }
 
 async function ensureContests(adminId, mode, stats) {
-  const allProblems = await Problem.find({ status: 'published' })
+  // Contests are built from the real problem bank, never from retired numbered copies that are
+  // only kept published for contests that already have submissions.
+  const allProblems = await Problem.find({ status: 'published', slug: { $not: /^(easy|medium|hard)-.+-\d+$/ } })
     .sort({ difficulty: 1, slug: 1 })
     .select('_id slug difficulty')
     .lean()
