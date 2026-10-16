@@ -12,7 +12,22 @@ const warned = { gemini: false, judge0: false };
 
 export const isGeminiConfigured = () => Boolean(env.gemini.apiKey?.trim());
 
-export const isJudge0Configured = () => Boolean(env.judge0.apiKey?.trim());
+// A self-hosted Judge0 (the free, open-source Judge0 CE) needs no API key: a JUDGE0_API_URL that is
+// not the RapidAPI marketplace endpoint is enough. Previously only a RapidAPI key counted as
+// "configured", so a working self-hosted URL was reported as Coming Soon.
+const RAPIDAPI_HOST = /(?:^|\.)rapidapi\.com$/i;
+
+export const isJudge0SelfHosted = () => {
+  const url = env.judge0.apiUrl?.trim();
+  if (!url) return false;
+  try {
+    return !RAPIDAPI_HOST.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+export const isJudge0Configured = () => Boolean(env.judge0.apiKey?.trim()) || isJudge0SelfHosted();
 
 // Mock mode is a dev/test convenience only — it can never activate in production,
 // so a `*_MOCK=true` left over from a dev .env can't silently bypass real credential
