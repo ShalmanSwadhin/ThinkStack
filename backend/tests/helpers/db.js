@@ -14,6 +14,11 @@ export async function connectTestDB() {
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
   }
 
+  // Every test file drops the database in afterAll, which also drops the indexes. Mongoose
+  // rebuilds them in the background after connecting, so a $text query issued straight away
+  // fails with IndexNotFound. Wait for the builds so tests never race the index creation.
+  await Promise.all(Object.values(mongoose.models).map((model) => model.init()));
+
   return uri;
 }
 
