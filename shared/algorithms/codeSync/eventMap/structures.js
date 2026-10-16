@@ -15,7 +15,8 @@ export const STRUCTURES = {
   'queue-operations': [
     rule(/initialize empty queue/i, /\bqueue\b/, 'first'),
     rule(/enqueue/i, /\bqueue\s*(?:\.\s*(?:append|enqueue|add|push|offer)\s*\(|\[\s*back\+\+)/, 'first'),
-    rule(/front element/i, /\b(?:front|frontVal)\s*=\s*queue\b/),
+    // "Front element is 5." (peek) — not "Dequeue front element.", which is the dequeue rule below.
+    rule(/^(?!dequeue)front element/i, /\b(?:front|frontVal)\s*=\s*queue\b/),
     rule(/dequeue/i, /\bqueue\s*\.\s*(?:pop|dequeue|poll|popleft|shift)\s*\(|\bfront\+\+/, 'first'),
     rule(/operations complete/i, [RETURN_VALUE, '@last'], 'last'),
   ],
@@ -29,7 +30,8 @@ export const STRUCTURES = {
 
   'hash-linear-probing': [
     entryRule(/create hash table/i, 'insert'),
-    rule(/^hash /i, /\bindex\s*=\s*(?:hash\s*\(\s*value\s*\)|value)\s*%/),
+    // "Hash 15: index = 15 % 7 = 1." — not "Hash table insertion complete."
+    rule(/^hash \S+: index/i, /\bindex\s*=\s*(?:hash\s*\(\s*value\s*\)|value)\s*%/),
     rule(/collision at index/i, /\bwhile\b.*\btable\s*\[\s*index\s*\]/),
     rule(/place .* at index/i, /\btable\s*\[\s*index\s*\]\s*=\s*value/),
     rule(/insertion complete/i, [RETURN_VALUE, '@last'], 'last'),

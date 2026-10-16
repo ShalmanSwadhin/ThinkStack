@@ -5,12 +5,13 @@ const cell = (a, b) => new RegExp(`\\bdp\\s*\\[\\s*${a}\\s*\\]\\s*\\[\\s*${b}\\s
 
 export const DP = {
   'fibonacci-dp': [
-    // Order matters: "Memo hit fib(3) = 2." also contains "fib(3) =".
+    // Every pattern is exclusive: the result rule is anchored, so "Memo hit fib(3) = 2." and
+    // "Base case fib(1) = 1." cannot also match it.
     rule(/memo hit/i, /\breturn\s+memo\s*\[\s*n\s*\]/, 'first'),
     rule(/base case/i, /\breturn\s+n\b/, 'first'),
     entryRule(/with memoization/i, 'fib'),
     rule(/from subproblems/i, /\bmemo\s*\[\s*n\s*\]\s*=\s*fib/),
-    rule(/fib\(\d+\) =/i, /\breturn\s+memo\s*\[\s*n\s*\]/, 'last'),
+    rule(/^fib\(\d+\) =/i, /\breturn\s+memo\s*\[\s*n\s*\]/, 'last'),
   ],
 
   'knapsack-dp': [
@@ -33,7 +34,7 @@ export const DP = {
       'first'
     ),
     rule(/lis ending at index/i, /\bdp\s*\[\s*i\s*\]\s*=\s*(?:(?:Math\.|std::)?max\s*\(|dp\s*\[\s*j\s*\])/i, 'first'),
-    rule(/lis length/i, [RETURN_VALUE, '@last'], 'last'),
+    rule(/^lis length\b/i, [RETURN_VALUE, '@last'], 'last'),
   ],
 
   'bitmask-dp': [
